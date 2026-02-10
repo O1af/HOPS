@@ -6,6 +6,7 @@ Supported distributions include:
 
    - Normal
    - Heavey-Tailed
+   - Poisson
    - TODO
 """
 
@@ -17,9 +18,7 @@ class Distribution(ABC):
    @abstractmethod
    def sample(self) -> float:
       "TODO dosctring"
-      return 4.0 #TODO
-   
-
+      
 class Normal(Distribution):
    
    def sample(self) -> float:
