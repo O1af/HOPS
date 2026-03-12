@@ -1,1 +1,105 @@
 # HOPS default configuration
+# 4-stage heterogeneous pipeline: 2 fast GPUs + 2 slower GPUs
+
+simulation:
+  num_microbatches: 8
+  num_batches: 4
+  seed: 42
+
+pipeline:
+  stages:
+    - id: 0
+      num_layers: 4
+      memory_mb: 2048
+      device: node0_gpu0
+      compute_latency: { type: normal, mean: 5.0, std: 0.5 }
+    - id: 1
+      num_layers: 4
+      memory_mb: 2048
+      device: node0_gpu1
+      compute_latency: { type: normal, mean: 5.0, std: 0.5 }
+    - id: 2
+      num_layers: 4
+      memory_mb: 3072
+      device: node1_gpu0
+      compute_latency: { type: normal, mean: 6.0, std: 0.8 }
+    - id: 3
+      num_layers: 4
+      memory_mb: 3072
+      device: node1_gpu1
+      compute_latency: { type: heavy_tailed, base: 6.0, alpha: 2.5 }
+
+scheduler:
+  policy: 1f1b
+
+hardware:
+  devices:
+    - id: node0_gpu0
+      kind: gpu
+      flops: 312
+      memory_mb: 81920
+      memory_bandwidth_gbps: 3350
+      numa_node: 0
+    - id: node0_gpu1
+      kind: gpu
+      flops: 312
+      memory_mb: 81920
+      memory_bandwidth_gbps: 3350
+      numa_node: 0
+    - id: node1_gpu0
+      kind: gpu
+      flops: 200
+      memory_mb: 49152
+      memory_bandwidth_gbps: 2000
+      numa_node: 1
+    - id: node1_gpu1
+      kind: gpu
+      flops: 200
+      memory_mb: 49152
+      memory_bandwidth_gbps: 2000
+      numa_node: 1
+  links:
+    - src: node0_gpu0
+      dst: node0_gpu1
+      bandwidth_gbps: 900
+      base_latency_us: 1.0
+      jitter: { type: normal, mean: 0.0, std: 0.1 }
+    - src: node0_gpu1
+      dst: node1_gpu0
+      bandwidth_gbps: 100
+      base_latency_us: 5.0
+      jitter: { type: normal, mean: 0.0, std: 1.0 }
+    - src: node1_gpu0
+      dst: node1_gpu1
+      bandwidth_gbps: 900
+      base_latency_us: 1.0
+      jitter: { type: normal, mean: 0.0, std: 0.1 }
+    # Reverse links for backward pass
+    - src: node1_gpu1
+      dst: node1_gpu0
+      bandwidth_gbps: 900
+      base_latency_us: 1.0
+      jitter: { type: normal, mean: 0.0, std: 0.1 }
+    - src: node1_gpu0
+      dst: node0_gpu1
+      bandwidth_gbps: 100
+      base_latency_us: 5.0
+      jitter: { type: normal, mean: 0.0, std: 1.0 }
+    - src: node0_gpu1
+      dst: node0_gpu0
+      bandwidth_gbps: 900
+      base_latency_us: 1.0
+      jitter: { type: normal, mean: 0.0, std: 0.1 }
+  activation_size_mb: 50
+
+failure:
+  enabled: false
+  check_interval: 10.0
+  device_fail_prob: 0.001
+  link_fail_prob: 0.0005
+  recovery_strategy: restart
+  recovery_time: 5.0
+
+output:
+  timeline_path: output/timeline.png
+  dashboard_path: output/dashboard.png
