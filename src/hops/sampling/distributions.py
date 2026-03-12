@@ -10,6 +10,10 @@ Supported distributions include:
    - TODO
 """
 
+import os
+
+RANDOM_SEED = 42
+
 from abc import ABC, abstractmethod
 
 class Distribution(ABC):
