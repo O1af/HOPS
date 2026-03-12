@@ -12,7 +12,7 @@ def test_device_from_yaml():
         "memory_mb": 8192, "memory_bandwidth_gbps": 1000, "numa_node": 0,
     })
     assert d.id == "gpu0"
-    assert d.flops == 100.0
+    assert d.memory_mb == 8192
 
 
 def test_link_transfer_time_positive():
@@ -50,7 +50,7 @@ def test_topology_from_yaml():
 
 def test_same_device_link_is_free():
     topo = Topology(
-        [Device("gpu0", "gpu", 100, 8192, 1000)],
+        [Device("gpu0", "gpu", 8192)],
         [],
     )
     link = topo.link("gpu0", "gpu0")

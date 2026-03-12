@@ -70,3 +70,16 @@ def test_multiple_handlers_per_event_kind():
 
     assert results_a == [1.0]
     assert results_b == [1.0]
+
+
+def test_same_time_events_preserve_insertion_order():
+    engine = EventEngine()
+    labels = []
+    engine.on(EventKind.COMPUTE_START, lambda e, eng: labels.append(e.payload["label"]))
+
+    engine.schedule(Event(time=1.0, kind=EventKind.COMPUTE_START, payload={"label": "a"}))
+    engine.schedule(Event(time=1.0, kind=EventKind.COMPUTE_START, payload={"label": "b"}))
+    engine.schedule(Event(time=1.0, kind=EventKind.COMPUTE_START, payload={"label": "c"}))
+    engine.run()
+
+    assert labels == ["a", "b", "c"]

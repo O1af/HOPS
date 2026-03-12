@@ -20,7 +20,7 @@ def make_test_pipeline(scheduler: Scheduler, *, num_stages: int = 4,
     Returns (engine, pipeline, collector).
     """
     np.random.seed(seed)
-    devices = [Device(f"gpu{i}", "gpu", 100, 8192, 1000) for i in range(num_stages)]
+    devices = [Device(f"gpu{i}", "gpu", 8192) for i in range(num_stages)]
     links = []
     for i in range(num_stages - 1):
         links.append(Link(f"gpu{i}", f"gpu{i+1}", 900, 0.0, Constant(0.0)))

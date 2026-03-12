@@ -56,3 +56,82 @@ def test_utilization_bounded():
     util = collector.per_stage_utilization()
     for stage_id, u in util.items():
         assert 0.0 < u <= 1.0, f"Stage {stage_id} utilization {u} out of bounds"
+
+
+def test_partial_run_does_not_count_completed_microbatches():
+    engine, pipeline, collector = make_test_pipeline(
+        GPipeScheduler(), num_stages=2, compute_time=10.0, seed=0)
+    pipeline.start_batch(2)
+    engine.run(until=10.0)
+
+    assert collector.completed_microbatches == 0
+    assert collector.e2e_latencies() == []
+
+
+def test_microbatch_completion_records_true_end_to_end_latency():
+    engine, pipeline, collector = make_test_pipeline(
+        GPipeScheduler(), num_stages=2, compute_time=10.0, seed=0)
+    pipeline.start_batch(1)
+    engine.run()
+
+    assert collector.completed_microbatches == 1
+    assert collector.e2e_latencies() == [60.0]
+
+
+def test_gpipe_bubble_ratio_matches_closed_form():
+    num_stages = 4
+    num_microbatches = 8
+    engine, pipeline, collector = make_test_pipeline(
+        GPipeScheduler(), num_stages=num_stages, compute_time=1.0, seed=0)
+    pipeline.start_batch(num_microbatches)
+    engine.run()
+
+    expected = (num_stages - 1) / (num_stages - 1 + num_microbatches)
+    assert abs(collector.bubble_ratio() - expected) < 1e-9
+
+
+def test_1f1b_peak_in_flight_per_stage_is_bounded_by_stage_count():
+    num_stages = 4
+    engine, pipeline, collector = make_test_pipeline(
+        OneFOneBScheduler(), num_stages=num_stages, compute_time=1.0, seed=0)
+    pipeline.start_batch(8)
+    engine.run()
+
+    peaks = collector.peak_in_flight_per_stage()
+    assert peaks
+    assert all(count <= num_stages for count in peaks.values())
+
+
+def test_gpipe_stage_occupancy_and_idle_intervals_match_trace():
+    engine, pipeline, collector = make_test_pipeline(
+        GPipeScheduler(), num_stages=2, compute_time=1.0, seed=0)
+    pipeline.start_batch(2)
+    engine.run()
+
+    assert collector.stage_occupancy_intervals() == {
+        0: [(0.0, 2.0), (5.0, 9.0)],
+        1: [(1.0, 7.0)],
+    }
+    assert collector.stage_idle_intervals() == {
+        0: [(2.0, 5.0)],
+        1: [(0.0, 1.0), (7.0, 9.0)],
+    }
+
+
+def test_1f1b_last_stage_sequence_matches_warmup_steady_flush_pattern():
+    engine, pipeline, collector = make_test_pipeline(
+        OneFOneBScheduler(), num_stages=2, compute_time=1.0, seed=0)
+    pipeline.start_batch(2)
+    engine.run()
+
+    last_stage_records = [
+        (record.phase, record.start_time, record.end_time)
+        for record in collector.computes
+        if record.stage_id == 1
+    ]
+    assert last_stage_records == [
+        (Phase.FORWARD, 1.0, 2.0),
+        (Phase.BACKWARD, 2.0, 4.0),
+        (Phase.FORWARD, 4.0, 5.0),
+        (Phase.BACKWARD, 5.0, 7.0),
+    ]

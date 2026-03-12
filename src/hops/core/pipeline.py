@@ -4,9 +4,8 @@ from dataclasses import dataclass
 
 from hops.core.event_engine import EventEngine
 from hops.core.scheduler import PipelineState, Scheduler
-from hops.core.types import Event, EventKind, MicroBatch, Phase, StageTask
-from hops.hardware.topology import Topology
-from hops.latency.compute_model import ComputeModel
+from hops.core.timing import TimingModel
+from hops.core.types import Event, EventKind, Phase
 from hops.metrics.collector import MetricsCollector
 
 
@@ -14,26 +13,23 @@ from hops.metrics.collector import MetricsCollector
 class Stage:
     id: int
     device_id: str
-    num_layers: int = 1
-    memory_mb: float = 0.0
 
 
 class Pipeline:
     """Orchestrates micro-batch flow through pipeline stages via events."""
 
     def __init__(self, stages: list[Stage], engine: EventEngine,
-                 topology: Topology, compute_model: ComputeModel,
+                 topology, compute_model,
                  scheduler: Scheduler, collector: MetricsCollector,
                  activation_size_mb: float = 50.0):
         self.stages = {s.id: s for s in stages}
         self.stage_order = [s.id for s in stages]
         self._stage_index = {sid: i for i, sid in enumerate(self.stage_order)}
         self.engine = engine
-        self.topology = topology
-        self.compute_model = compute_model
         self.scheduler = scheduler
         self.collector = collector
         self.activation_size_mb = activation_size_mb
+        self.timing_model = TimingModel(topology, compute_model)
 
         self._state = PipelineState(num_stages=len(stages), num_microbatches=0)
         self._batch_done_count = 0
@@ -48,10 +44,9 @@ class Pipeline:
 
     def start_batch(self, num_microbatches: int) -> None:
         """Begin a training step with N micro-batches."""
-        self._state = PipelineState(
+        self._state = PipelineState.initialize(
             num_stages=len(self.stages),
             num_microbatches=num_microbatches,
-            now=self.engine.now,
         )
         self._batch_done_count = 0
         self._expected_done_count = num_microbatches
@@ -59,25 +54,27 @@ class Pipeline:
         self._total_mb_issued += num_microbatches
         self._issue_ready_tasks()
 
+    @property
+    def batch_complete(self) -> bool:
+        return self._expected_done_count > 0 and self._batch_done_count >= self._expected_done_count
+
+    def set_failure_engine(self, failure_engine) -> None:
+        self.timing_model.set_failure_engine(failure_engine)
+
     def _issue_ready_tasks(self) -> None:
         """Ask the scheduler what to run and schedule COMPUTE_START events."""
-        self._state.now = self.engine.now
         tasks = self.scheduler.next_tasks(self._state)
         for task in tasks:
-            key = (task.stage_id, task.microbatch.id, task.phase)
-            if key in self._state.in_flight:
+            if not self._state.is_task_ready(task.stage_id, task.microbatch_id, task.phase):
                 continue
-            self._state.in_flight.add(key)
-            self._state.in_flight_count[task.stage_id] += 1
-            stage = self.stages[task.stage_id]
-            device = self.topology.device(stage.device_id)
-            # Respect device busy_until
-            start_time = max(self.engine.now, device.busy_until)
+            self._state.reserve_task(task.stage_id, task.microbatch_id, task.phase)
+            self.collector.record_in_flight(
+                task.stage_id, self.engine.now, self._state.stage_in_flight_count(task.stage_id))
             self.engine.schedule(Event(
-                time=start_time,
+                time=self.engine.now,
                 kind=EventKind.COMPUTE_START,
                 payload={"stage_id": task.stage_id,
-                         "microbatch_id": task.microbatch.id,
+                         "microbatch_id": task.microbatch_id,
                          "phase": task.phase},
             ))
 
@@ -86,26 +83,27 @@ class Pipeline:
         mb_id = event.payload["microbatch_id"]
         phase = event.payload["phase"]
         device_id = self.stages[stage_id].device_id
-        device = self.topology.device(device_id)
-
-        # If device is still busy, defer this compute
-        if device.busy_until > engine.now:
+        start_time, end_time = self.timing_model.reserve_compute(
+            now=engine.now,
+            stage_id=stage_id,
+            device_id=device_id,
+            phase=phase,
+        )
+        if start_time > engine.now:
             engine.schedule(Event(
-                time=device.busy_until,
+                time=start_time,
                 kind=EventKind.COMPUTE_START,
                 payload=event.payload,
             ))
             return
 
-        latency = self.compute_model.sample(stage_id, phase)
-        end_time = engine.now + latency
-        device.busy_until = end_time
+        self._state.begin_compute(stage_id, mb_id, phase)
 
         engine.schedule(Event(
             time=end_time,
             kind=EventKind.COMPUTE_END,
             payload={"stage_id": stage_id, "microbatch_id": mb_id,
-                     "phase": phase, "compute_start": engine.now},
+                     "phase": phase, "compute_start": start_time},
         ))
 
     def _on_compute_end(self, event: Event, engine: EventEngine) -> None:
@@ -120,43 +118,36 @@ class Pipeline:
         self.collector.record_compute(stage_id, global_mb_id, phase, device_id,
                                       start_time, engine.now)
 
-        # Mark completed and update incremental counters
-        key = (stage_id, mb_id, phase)
-        self._state.in_flight.discard(key)
-        self._state.in_flight_count[stage_id] -= 1
-        self._state.completed.add(key)
-        if phase == Phase.FORWARD:
-            self._state.fwd_completed[stage_id] += 1
-        else:
-            self._state.bwd_completed[stage_id] += 1
+        self._state.finish_task(stage_id, mb_id, phase)
+        self.collector.record_in_flight(stage_id, engine.now, self._state.stage_in_flight_count(stage_id))
+        self._advance_after_task_completion(
+            stage_id=stage_id,
+            microbatch_id=mb_id,
+            phase=phase,
+            global_microbatch_id=global_mb_id,
+            now=engine.now,
+        )
 
-        # Determine next action based on phase and position
+    def _advance_after_task_completion(self, *, stage_id: int, microbatch_id: int,
+                                       phase: Phase, global_microbatch_id: int,
+                                       now: float) -> None:
+        """Apply logical dependency transitions after a compute finishes."""
         stage_idx = self._stage_index[stage_id]
 
         if phase == Phase.FORWARD:
             if stage_idx < len(self.stage_order) - 1:
-                # Transfer activations to next stage
                 next_stage_id = self.stage_order[stage_idx + 1]
-                # Mark destination as in-flight so scheduler won't double-book
-                self._state.in_flight.add((next_stage_id, mb_id, Phase.FORWARD))
-                self._state.in_flight_count[next_stage_id] += 1
-                self._schedule_transfer(mb_id, phase, stage_id, next_stage_id)
-            # Last stage forward done: scheduler decides when backward starts
+                self._schedule_transfer(microbatch_id, phase, stage_id, next_stage_id)
+            else:
+                self._state.mark_ready(stage_id, microbatch_id, Phase.BACKWARD)
         else:  # BACKWARD
             if stage_idx > 0:
-                # Transfer gradients to previous stage
                 prev_stage_id = self.stage_order[stage_idx - 1]
-                # Mark destination as in-flight
-                self._state.in_flight.add((prev_stage_id, mb_id, Phase.BACKWARD))
-                self._state.in_flight_count[prev_stage_id] += 1
-                self._schedule_transfer(mb_id, phase, stage_id, prev_stage_id)
+                self._schedule_transfer(microbatch_id, phase, stage_id, prev_stage_id)
             else:
-                # Stage 0 backward done: micro-batch complete
                 self._batch_done_count += 1
-                if self._batch_done_count >= self._expected_done_count:
-                    self.collector.record_batch_completion(engine.now)
+                self.collector.record_microbatch_completion(global_microbatch_id, now)
 
-        # Ask scheduler for more work
         self._issue_ready_tasks()
 
     def _schedule_transfer(self, mb_id: int, phase: Phase,
@@ -175,14 +166,24 @@ class Pipeline:
     def _on_transfer_start(self, event: Event, engine: EventEngine) -> None:
         src = event.payload["src_device"]
         dst = event.payload["dst_device"]
-
-        link = self.topology.link(src, dst)
-        transfer_time = link.sample_transfer_time(self.activation_size_mb)
+        start_time, end_time = self.timing_model.reserve_transfer(
+            now=engine.now,
+            src_device=src,
+            dst_device=dst,
+            size_mb=self.activation_size_mb,
+        )
+        if start_time > engine.now:
+            engine.schedule(Event(
+                time=start_time,
+                kind=EventKind.TRANSFER_START,
+                payload=event.payload,
+            ))
+            return
 
         engine.schedule(Event(
-            time=engine.now + transfer_time,
+            time=end_time,
             kind=EventKind.TRANSFER_END,
-            payload={**event.payload, "transfer_start": engine.now},
+            payload={**event.payload, "transfer_start": start_time},
         ))
 
     def _on_transfer_end(self, event: Event, engine: EventEngine) -> None:
@@ -196,10 +197,14 @@ class Pipeline:
             global_mb_id, phase, event.payload["src_device"],
             event.payload["dst_device"], transfer_start, engine.now)
 
-        # Start computation on destination stage (already marked in_flight)
-        engine.schedule(Event(
-            time=engine.now,
-            kind=EventKind.COMPUTE_START,
-            payload={"stage_id": to_stage, "microbatch_id": mb_id,
-                     "phase": phase},
-        ))
+        self._advance_after_transfer_completion(
+            stage_id=to_stage,
+            microbatch_id=mb_id,
+            phase=phase,
+        )
+
+    def _advance_after_transfer_completion(self, *, stage_id: int, microbatch_id: int,
+                                           phase: Phase) -> None:
+        """Release newly available work after a transfer completes."""
+        self._state.mark_ready(stage_id, microbatch_id, phase)
+        self._issue_ready_tasks()

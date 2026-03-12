@@ -25,8 +25,7 @@ def test_default_config_runs():
     engine = EventEngine()
 
     stages = [
-        Stage(id=s["id"], device_id=s["device"],
-              num_layers=s.get("num_layers", 1))
+        Stage(id=s["id"], device_id=s["device"])
         for s in config["pipeline"]["stages"]
     ]
     pipeline = Pipeline(stages, engine, topology, compute_model,

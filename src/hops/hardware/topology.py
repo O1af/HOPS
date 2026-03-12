@@ -34,6 +34,10 @@ class Topology:
     def devices(self) -> dict[str, Device]:
         return self._devices
 
+    @property
+    def links(self) -> dict[tuple[str, str], Link]:
+        return self._links
+
     @classmethod
     def from_yaml(cls, config: dict) -> "Topology":
         devices = [Device.from_yaml(d) for d in config["devices"]]
