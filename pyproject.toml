@@ -11,6 +11,7 @@ authors = [
     { name = "Rishith Seelam", email = "rseelam@umich.edu" },
 ]
 dependencies = [
+    "numpy",
     "pyyaml",
 ]
 
