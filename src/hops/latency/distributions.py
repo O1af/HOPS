@@ -55,7 +55,7 @@ class HeavyTailed(Distribution):
         self.alpha = alpha
 
     def sample(self) -> float:
-        return self.base * np.random.pareto(self.alpha)
+        return self.base * (1.0 + np.random.pareto(self.alpha))
 
 
 class Poisson(Distribution):

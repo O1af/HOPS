@@ -19,6 +19,14 @@ class Phase(Enum):
     BACKWARD = auto()
 
 
+class TaskStatus(Enum):
+    WAITING = auto()
+    READY = auto()
+    SCHEDULED = auto()
+    RUNNING = auto()
+    COMPLETED = auto()
+
+
 @dataclass(order=True)
 class Event:
     time: float
@@ -27,13 +35,7 @@ class Event:
 
 
 @dataclass
-class MicroBatch:
-    id: int
-    global_batch_id: int = 0
-
-
-@dataclass
 class StageTask:
-    microbatch: MicroBatch
+    microbatch_id: int
     stage_id: int
     phase: Phase

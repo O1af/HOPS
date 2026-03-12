@@ -39,6 +39,13 @@ def test_heavy_tailed_produces_outliers():
     assert max(samples) > 5.0
 
 
+def test_heavy_tailed_respects_base_floor():
+    np.random.seed(0)
+    d = HeavyTailed(base=6.0, alpha=2.5)
+    samples = [d.sample() for _ in range(1000)]
+    assert min(samples) >= 6.0
+
+
 def test_poisson_mean_within_tolerance():
     np.random.seed(0)
     d = Poisson(lam=5.0)

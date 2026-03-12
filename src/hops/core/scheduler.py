@@ -1,29 +1,84 @@
 """Scheduling policies for pipeline execution."""
 
 from abc import ABC, abstractmethod
-from collections import defaultdict
 from dataclasses import dataclass, field
 
-from hops.core.types import MicroBatch, Phase, StageTask
+from hops.core.types import Phase, StageTask, TaskStatus
 
 
 @dataclass
 class PipelineState:
     num_stages: int
     num_microbatches: int
-    completed: set[tuple[int, int, Phase]] = field(default_factory=set)
-    in_flight: set[tuple[int, int, Phase]] = field(default_factory=set)
-    now: float = 0.0
-    # Incremental counters (maintained by Pipeline)
-    fwd_completed: dict[int, int] = field(default_factory=lambda: defaultdict(int))
-    bwd_completed: dict[int, int] = field(default_factory=lambda: defaultdict(int))
-    in_flight_count: dict[int, int] = field(default_factory=lambda: defaultdict(int))
+    task_states: dict[tuple[int, int, Phase], TaskStatus] = field(default_factory=dict)
 
-    def can_start_forward(self, stage: int, mb: int) -> bool:
-        return stage == 0 or (stage - 1, mb, Phase.FORWARD) in self.completed
+    @classmethod
+    def initialize(cls, num_stages: int, num_microbatches: int) -> "PipelineState":
+        task_states = {}
+        for mb in range(num_microbatches):
+            for stage in range(num_stages):
+                task_states[(stage, mb, Phase.FORWARD)] = TaskStatus.WAITING
+                task_states[(stage, mb, Phase.BACKWARD)] = TaskStatus.WAITING
+            task_states[(0, mb, Phase.FORWARD)] = TaskStatus.READY
+        return cls(
+            num_stages=num_stages,
+            num_microbatches=num_microbatches,
+            task_states=task_states,
+        )
 
-    def can_start_backward(self, stage: int, mb: int) -> bool:
-        return stage == self.num_stages - 1 or (stage + 1, mb, Phase.BACKWARD) in self.completed
+    def is_task_ready(self, stage_id: int, microbatch_id: int, phase: Phase) -> bool:
+        return self.task_states[(stage_id, microbatch_id, phase)] == TaskStatus.READY
+
+    def mark_ready(self, stage_id: int, microbatch_id: int, phase: Phase) -> None:
+        key = (stage_id, microbatch_id, phase)
+        if self.task_states[key] != TaskStatus.COMPLETED:
+            self.task_states[key] = TaskStatus.READY
+
+    def reserve_task(self, stage_id: int, microbatch_id: int, phase: Phase) -> None:
+        key = (stage_id, microbatch_id, phase)
+        if self.task_states[key] != TaskStatus.READY:
+            raise ValueError(f"Cannot reserve task {key} from state {self.task_states[key]}")
+        self.task_states[key] = TaskStatus.SCHEDULED
+
+    def begin_compute(self, stage_id: int, microbatch_id: int, phase: Phase) -> None:
+        key = (stage_id, microbatch_id, phase)
+        if self.task_states[key] != TaskStatus.SCHEDULED:
+            raise ValueError(f"Cannot start compute for task {key} from state {self.task_states[key]}")
+        self.task_states[key] = TaskStatus.RUNNING
+
+    def finish_task(self, stage_id: int, microbatch_id: int, phase: Phase) -> None:
+        key = (stage_id, microbatch_id, phase)
+        if self.task_states[key] != TaskStatus.RUNNING:
+            raise ValueError(f"Cannot finish task {key} from state {self.task_states[key]}")
+        self.task_states[key] = TaskStatus.COMPLETED
+
+    def stage_is_busy(self, stage_id: int) -> bool:
+        return any(
+            status == TaskStatus.RUNNING and task_stage == stage_id
+            for (task_stage, _, _), status in self.task_states.items()
+        )
+
+    def stage_in_flight_count(self, stage_id: int) -> int:
+        return sum(
+            1
+            for (task_stage, _, _), status in self.task_states.items()
+            if task_stage == stage_id and status in {TaskStatus.SCHEDULED, TaskStatus.RUNNING}
+        )
+
+    def completed_count(self, stage_id: int, phase: Phase) -> int:
+        return sum(
+            1
+            for (task_stage, _, task_phase), status in self.task_states.items()
+            if task_stage == stage_id and task_phase == phase and status == TaskStatus.COMPLETED
+        )
+
+    def all_forwards_completed(self) -> bool:
+        total_fwd = sum(
+            1
+            for (_, _, phase), status in self.task_states.items()
+            if phase == Phase.FORWARD and status == TaskStatus.COMPLETED
+        )
+        return total_fwd == self.num_stages * self.num_microbatches
 
 
 class Scheduler(ABC):
@@ -39,26 +94,17 @@ class GPipeScheduler(Scheduler):
         tasks = []
         s = state
 
-        total_fwd = sum(s.fwd_completed[st] for st in range(s.num_stages))
-        all_forwards_done = total_fwd == s.num_stages * s.num_microbatches
-
-        if not all_forwards_done:
+        if not s.all_forwards_completed():
             for mb in range(s.num_microbatches):
                 for stage in range(s.num_stages):
-                    key = (stage, mb, Phase.FORWARD)
-                    if key in s.completed or key in s.in_flight:
-                        continue
-                    if s.can_start_forward(stage, mb):
-                        tasks.append(StageTask(MicroBatch(mb), stage, Phase.FORWARD))
+                    if s.is_task_ready(stage, mb, Phase.FORWARD):
+                        tasks.append(StageTask(mb, stage, Phase.FORWARD))
             return tasks
 
         for mb in range(s.num_microbatches):
             for stage in reversed(range(s.num_stages)):
-                key = (stage, mb, Phase.BACKWARD)
-                if key in s.completed or key in s.in_flight:
-                    continue
-                if s.can_start_backward(stage, mb):
-                    tasks.append(StageTask(MicroBatch(mb), stage, Phase.BACKWARD))
+                if s.is_task_ready(stage, mb, Phase.BACKWARD):
+                    tasks.append(StageTask(mb, stage, Phase.BACKWARD))
         return tasks
 
 
@@ -70,10 +116,10 @@ class OneFOneBScheduler(Scheduler):
         s = state
 
         for stage in range(s.num_stages):
-            fwd_done = s.fwd_completed[stage]
-            bwd_done = s.bwd_completed[stage]
+            fwd_done = s.completed_count(stage, Phase.FORWARD)
+            bwd_done = s.completed_count(stage, Phase.BACKWARD)
 
-            if s.in_flight_count[stage] > 0:
+            if s.stage_is_busy(stage):
                 continue
 
             warmup_limit = s.num_stages - stage
@@ -81,28 +127,22 @@ class OneFOneBScheduler(Scheduler):
             # Prefer backward if we have pending backwards and past warmup
             if fwd_done > bwd_done and fwd_done >= warmup_limit:
                 mb = bwd_done
-                key = (stage, mb, Phase.BACKWARD)
-                if key not in s.completed and key not in s.in_flight:
-                    if s.can_start_backward(stage, mb):
-                        tasks.append(StageTask(MicroBatch(mb), stage, Phase.BACKWARD))
-                        continue
+                if s.is_task_ready(stage, mb, Phase.BACKWARD):
+                    tasks.append(StageTask(mb, stage, Phase.BACKWARD))
+                    continue
 
             # Issue next forward if available
             if fwd_done < s.num_microbatches:
                 mb = fwd_done
-                key = (stage, mb, Phase.FORWARD)
-                if key not in s.completed and key not in s.in_flight:
-                    if s.can_start_forward(stage, mb):
-                        tasks.append(StageTask(MicroBatch(mb), stage, Phase.FORWARD))
-                        continue
+                if s.is_task_ready(stage, mb, Phase.FORWARD):
+                    tasks.append(StageTask(mb, stage, Phase.FORWARD))
+                    continue
 
             # Fallback: issue backward if forward is done
             if bwd_done < s.num_microbatches and fwd_done > bwd_done:
                 mb = bwd_done
-                key = (stage, mb, Phase.BACKWARD)
-                if key not in s.completed and key not in s.in_flight:
-                    if s.can_start_backward(stage, mb):
-                        tasks.append(StageTask(MicroBatch(mb), stage, Phase.BACKWARD))
+                if s.is_task_ready(stage, mb, Phase.BACKWARD):
+                    tasks.append(StageTask(mb, stage, Phase.BACKWARD))
 
         return tasks
 
