@@ -10,6 +10,8 @@ from hops.hardware.topology import Topology
 from hops.latency.compute_model import ComputeModel
 from hops.metrics.collector import MetricsCollector
 
+from .conftest import make_test_pipeline
+
 
 def test_default_config_runs():
     """Load default.yaml and run a full simulation."""
@@ -37,33 +39,15 @@ def test_default_config_runs():
         pipeline.start_batch(num_mb)
         engine.run()
 
-    assert len(collector._mb_end_times) == num_batches * num_mb
+    assert collector.completed_microbatches == num_batches * num_mb
     assert collector.throughput() > 0
     assert 0 < collector.bubble_ratio() < 1
 
 
 def test_1f1b_less_bubbles_than_gpipe():
     """1F1B should have lower bubble ratio than GPipe on the same config."""
-    from hops.hardware.device import Device
-    from hops.hardware.network import Link
-    from hops.latency.distributions import Constant
-
     def run_with_scheduler(scheduler):
-        np.random.seed(42)
-        n = 4
-        devices = [Device(f"gpu{i}", "gpu", 100, 8192, 1000) for i in range(n)]
-        links = []
-        for i in range(n - 1):
-            links.append(Link(f"gpu{i}", f"gpu{i+1}", 900, 0.0, Constant(0.0)))
-            links.append(Link(f"gpu{i+1}", f"gpu{i}", 900, 0.0, Constant(0.0)))
-        topology = Topology(devices, links)
-        dists = {i: Constant(5.0) for i in range(n)}
-        compute_model = ComputeModel(dists)
-        collector = MetricsCollector()
-        engine = EventEngine()
-        stages = [Stage(i, f"gpu{i}") for i in range(n)]
-        pipeline = Pipeline(stages, engine, topology, compute_model,
-                            scheduler, collector, 0.0)
+        engine, pipeline, collector = make_test_pipeline(scheduler)
         pipeline.start_batch(8)
         engine.run()
         return collector.bubble_ratio()

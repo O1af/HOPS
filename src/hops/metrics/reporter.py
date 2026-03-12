@@ -17,7 +17,7 @@ class Reporter:
         print("HOPS Simulation Report")
         print("=" * 60)
 
-        print(f"\nMicro-batches completed: {len(c._mb_end_times)}")
+        print(f"\nMicro-batches completed: {c.completed_microbatches}")
         print(f"Throughput: {c.throughput():.4f} micro-batches/ms")
 
         latencies = c.e2e_latencies()
@@ -36,11 +36,10 @@ class Reporter:
             for stage_id, u in util.items():
                 print(f"  Stage {stage_id}: {u:.2%}")
 
-        if c.transfers:
-            total_transfer = sum(t.end_time - t.start_time for t in c.transfers)
-            total_compute = sum(r.end_time - r.start_time for r in c.computes)
-            if total_compute > 0:
-                print(f"\nCommunication overhead: {total_transfer / total_compute:.2%} of compute")
+        total_compute = c.total_compute_time()
+        total_transfer = c.total_transfer_time()
+        if total_compute > 0 and c.transfers:
+            print(f"\nCommunication overhead: {total_transfer / total_compute:.2%} of compute")
 
         if c.failures:
             print(f"\nFailures: {len(c.failures)}")

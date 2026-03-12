@@ -27,6 +27,7 @@ class Pipeline:
                  activation_size_mb: float = 50.0):
         self.stages = {s.id: s for s in stages}
         self.stage_order = [s.id for s in stages]
+        self._stage_index = {sid: i for i, sid in enumerate(self.stage_order)}
         self.engine = engine
         self.topology = topology
         self.compute_model = compute_model
@@ -67,6 +68,7 @@ class Pipeline:
             if key in self._state.in_flight:
                 continue
             self._state.in_flight.add(key)
+            self._state.in_flight_count[task.stage_id] += 1
             stage = self.stages[task.stage_id]
             device = self.topology.device(stage.device_id)
             # Respect device busy_until
@@ -118,13 +120,18 @@ class Pipeline:
         self.collector.record_compute(stage_id, global_mb_id, phase, device_id,
                                       start_time, engine.now)
 
-        # Mark completed
+        # Mark completed and update incremental counters
         key = (stage_id, mb_id, phase)
         self._state.in_flight.discard(key)
+        self._state.in_flight_count[stage_id] -= 1
         self._state.completed.add(key)
+        if phase == Phase.FORWARD:
+            self._state.fwd_completed[stage_id] += 1
+        else:
+            self._state.bwd_completed[stage_id] += 1
 
         # Determine next action based on phase and position
-        stage_idx = self.stage_order.index(stage_id)
+        stage_idx = self._stage_index[stage_id]
 
         if phase == Phase.FORWARD:
             if stage_idx < len(self.stage_order) - 1:
@@ -132,6 +139,7 @@ class Pipeline:
                 next_stage_id = self.stage_order[stage_idx + 1]
                 # Mark destination as in-flight so scheduler won't double-book
                 self._state.in_flight.add((next_stage_id, mb_id, Phase.FORWARD))
+                self._state.in_flight_count[next_stage_id] += 1
                 self._schedule_transfer(mb_id, phase, stage_id, next_stage_id)
             # Last stage forward done: scheduler decides when backward starts
         else:  # BACKWARD
@@ -140,6 +148,7 @@ class Pipeline:
                 prev_stage_id = self.stage_order[stage_idx - 1]
                 # Mark destination as in-flight
                 self._state.in_flight.add((prev_stage_id, mb_id, Phase.BACKWARD))
+                self._state.in_flight_count[prev_stage_id] += 1
                 self._schedule_transfer(mb_id, phase, stage_id, prev_stage_id)
             else:
                 # Stage 0 backward done: micro-batch complete

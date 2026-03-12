@@ -3,7 +3,6 @@
 import os
 
 import matplotlib.pyplot as plt
-import numpy as np
 
 from hops.metrics.collector import MetricsCollector
 
@@ -47,8 +46,8 @@ def draw_dashboard(collector: MetricsCollector, output_path: str) -> None:
 
     # 4. Communication vs compute time
     ax = axes[1, 1]
-    total_compute = sum(r.end_time - r.start_time for r in collector.computes)
-    total_transfer = sum(t.end_time - t.start_time for t in collector.transfers)
+    total_compute = collector.total_compute_time()
+    total_transfer = collector.total_transfer_time()
     if total_compute + total_transfer > 0:
         ax.bar(["Compute", "Communication"], [total_compute, total_transfer],
                color=["#4C9BE8", "#E8804C"])

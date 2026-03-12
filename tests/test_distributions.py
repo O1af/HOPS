@@ -1,6 +1,7 @@
 """Tests for latency distributions."""
 
 import numpy as np
+import pytest
 
 from hops.latency.distributions import (
     Constant,
@@ -35,7 +36,6 @@ def test_heavy_tailed_produces_outliers():
     np.random.seed(42)
     d = HeavyTailed(base=1.0, alpha=2.0)
     samples = [d.sample() for _ in range(10000)]
-    # Pareto should produce some values >> base
     assert max(samples) > 5.0
 
 
@@ -63,8 +63,5 @@ def test_from_yaml_heavy_tailed():
 
 
 def test_from_yaml_unknown_raises():
-    try:
+    with pytest.raises(ValueError):
         Distribution.from_yaml({"type": "unknown"})
-        assert False, "Should have raised ValueError"
-    except ValueError:
-        pass

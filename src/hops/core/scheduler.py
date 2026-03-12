@@ -1,6 +1,7 @@
 """Scheduling policies for pipeline execution."""
 
 from abc import ABC, abstractmethod
+from collections import defaultdict
 from dataclasses import dataclass, field
 
 from hops.core.types import MicroBatch, Phase, StageTask
@@ -10,9 +11,19 @@ from hops.core.types import MicroBatch, Phase, StageTask
 class PipelineState:
     num_stages: int
     num_microbatches: int
-    completed: set[tuple[int, int, Phase]] = field(default_factory=set)  # (stage, mb, phase)
+    completed: set[tuple[int, int, Phase]] = field(default_factory=set)
     in_flight: set[tuple[int, int, Phase]] = field(default_factory=set)
     now: float = 0.0
+    # Incremental counters (maintained by Pipeline)
+    fwd_completed: dict[int, int] = field(default_factory=lambda: defaultdict(int))
+    bwd_completed: dict[int, int] = field(default_factory=lambda: defaultdict(int))
+    in_flight_count: dict[int, int] = field(default_factory=lambda: defaultdict(int))
+
+    def can_start_forward(self, stage: int, mb: int) -> bool:
+        return stage == 0 or (stage - 1, mb, Phase.FORWARD) in self.completed
+
+    def can_start_backward(self, stage: int, mb: int) -> bool:
+        return stage == self.num_stages - 1 or (stage + 1, mb, Phase.BACKWARD) in self.completed
 
 
 class Scheduler(ABC):
@@ -28,33 +39,25 @@ class GPipeScheduler(Scheduler):
         tasks = []
         s = state
 
-        # Phase 1: issue all forwards
-        all_forwards_done = all(
-            (stage, mb, Phase.FORWARD) in s.completed
-            for stage in range(s.num_stages)
-            for mb in range(s.num_microbatches)
-        )
+        total_fwd = sum(s.fwd_completed[st] for st in range(s.num_stages))
+        all_forwards_done = total_fwd == s.num_stages * s.num_microbatches
 
         if not all_forwards_done:
-            # Issue forward passes stage by stage
             for mb in range(s.num_microbatches):
                 for stage in range(s.num_stages):
                     key = (stage, mb, Phase.FORWARD)
                     if key in s.completed or key in s.in_flight:
                         continue
-                    # Can start if previous stage is done (or stage 0)
-                    if stage == 0 or (stage - 1, mb, Phase.FORWARD) in s.completed:
+                    if s.can_start_forward(stage, mb):
                         tasks.append(StageTask(MicroBatch(mb), stage, Phase.FORWARD))
             return tasks
 
-        # Phase 2: issue backward passes (reverse stage order)
         for mb in range(s.num_microbatches):
             for stage in reversed(range(s.num_stages)):
                 key = (stage, mb, Phase.BACKWARD)
                 if key in s.completed or key in s.in_flight:
                     continue
-                # Can start if next stage backward is done (or last stage)
-                if stage == s.num_stages - 1 or (stage + 1, mb, Phase.BACKWARD) in s.completed:
+                if s.can_start_backward(stage, mb):
                     tasks.append(StageTask(MicroBatch(mb), stage, Phase.BACKWARD))
         return tasks
 
@@ -67,28 +70,20 @@ class OneFOneBScheduler(Scheduler):
         s = state
 
         for stage in range(s.num_stages):
-            # Count how many forwards and backwards this stage has completed
-            fwd_done = sum(1 for mb in range(s.num_microbatches)
-                          if (stage, mb, Phase.FORWARD) in s.completed)
-            bwd_done = sum(1 for mb in range(s.num_microbatches)
-                          if (stage, mb, Phase.BACKWARD) in s.completed)
-            in_flight_here = any((stage, mb, p) in s.in_flight
-                                for mb in range(s.num_microbatches)
-                                for p in Phase)
+            fwd_done = s.fwd_completed[stage]
+            bwd_done = s.bwd_completed[stage]
 
-            if in_flight_here:
+            if s.in_flight_count[stage] > 0:
                 continue
 
-            # Warmup: allow up to (num_stages - stage) forwards before first backward
             warmup_limit = s.num_stages - stage
 
             # Prefer backward if we have pending backwards and past warmup
             if fwd_done > bwd_done and fwd_done >= warmup_limit:
-                # Issue next backward
                 mb = bwd_done
                 key = (stage, mb, Phase.BACKWARD)
                 if key not in s.completed and key not in s.in_flight:
-                    if stage == s.num_stages - 1 or (stage + 1, mb, Phase.BACKWARD) in s.completed:
+                    if s.can_start_backward(stage, mb):
                         tasks.append(StageTask(MicroBatch(mb), stage, Phase.BACKWARD))
                         continue
 
@@ -97,7 +92,7 @@ class OneFOneBScheduler(Scheduler):
                 mb = fwd_done
                 key = (stage, mb, Phase.FORWARD)
                 if key not in s.completed and key not in s.in_flight:
-                    if stage == 0 or (stage - 1, mb, Phase.FORWARD) in s.completed:
+                    if s.can_start_forward(stage, mb):
                         tasks.append(StageTask(MicroBatch(mb), stage, Phase.FORWARD))
                         continue
 
@@ -106,7 +101,7 @@ class OneFOneBScheduler(Scheduler):
                 mb = bwd_done
                 key = (stage, mb, Phase.BACKWARD)
                 if key not in s.completed and key not in s.in_flight:
-                    if stage == s.num_stages - 1 or (stage + 1, mb, Phase.BACKWARD) in s.completed:
+                    if s.can_start_backward(stage, mb):
                         tasks.append(StageTask(MicroBatch(mb), stage, Phase.BACKWARD))
 
         return tasks

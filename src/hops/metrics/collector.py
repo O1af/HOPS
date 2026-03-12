@@ -1,6 +1,6 @@
 """Runtime statistics accumulation."""
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 import numpy as np
 
@@ -52,8 +52,9 @@ class MetricsCollector:
         # Track per-microbatch start/end for e2e latency
         if microbatch_id not in self._mb_start_times:
             self._mb_start_times[microbatch_id] = start_time
-        self._mb_start_times[microbatch_id] = min(
-            self._mb_start_times[microbatch_id], start_time)
+        else:
+            self._mb_start_times[microbatch_id] = min(
+                self._mb_start_times[microbatch_id], start_time)
         self._mb_end_times[microbatch_id] = max(
             self._mb_end_times.get(microbatch_id, 0.0), end_time)
 
@@ -67,6 +68,10 @@ class MetricsCollector:
 
     def record_batch_completion(self, time: float) -> None:
         self._batch_completions.append(time)
+
+    @property
+    def completed_microbatches(self) -> int:
+        return len(self._mb_end_times)
 
     def e2e_latencies(self) -> list[float]:
         """Per-microbatch end-to-end latency."""
@@ -82,6 +87,12 @@ class MetricsCollector:
         if total_time <= 0:
             return 0.0
         return len(self._mb_end_times) / total_time
+
+    def total_compute_time(self) -> float:
+        return sum(r.end_time - r.start_time for r in self.computes)
+
+    def total_transfer_time(self) -> float:
+        return sum(t.end_time - t.start_time for t in self.transfers)
 
     def per_stage_utilization(self) -> dict[int, float]:
         """Fraction of total time each stage spent computing."""
