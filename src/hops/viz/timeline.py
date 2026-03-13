@@ -12,6 +12,7 @@ from hops.metrics.collector import MetricsCollector
 COLORS = {
     Phase.FORWARD: "#4C9BE8",
     Phase.BACKWARD: "#E8804C",
+    Phase.OPTIMIZER: "#6BC86B",
 }
 
 
@@ -57,6 +58,7 @@ def draw_timeline(collector: MetricsCollector, output_path: str) -> None:
     ax.legend(handles=[
         mpatches.Patch(color=COLORS[Phase.FORWARD], label="Forward"),
         mpatches.Patch(color=COLORS[Phase.BACKWARD], label="Backward"),
+        mpatches.Patch(color=COLORS[Phase.OPTIMIZER], label="Optimizer"),
     ], loc="upper right")
     plt.tight_layout()
     plt.savefig(output_path, dpi=150)

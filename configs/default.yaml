@@ -92,6 +92,11 @@ hardware:
       jitter: { type: normal, mean: 0.0, std: 0.1 }
   activation_size_mb: 50
 
+optimizer:
+  enabled: true
+  gradient_size_mb: 100
+  compute_latency: { type: normal, mean: 2.0, std: 0.3 }
+
 failure:
   enabled: false
   check_interval: 10.0

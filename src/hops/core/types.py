@@ -10,6 +10,10 @@ class EventKind(Enum):
     COMPUTE_END = auto()
     TRANSFER_START = auto()
     TRANSFER_END = auto()
+    ALLREDUCE_START = auto()
+    ALLREDUCE_END = auto()
+    OPTIMIZER_START = auto()
+    OPTIMIZER_END = auto()
     FAILURE = auto()
     RECOVERY = auto()
 
@@ -17,6 +21,7 @@ class EventKind(Enum):
 class Phase(Enum):
     FORWARD = auto()
     BACKWARD = auto()
+    OPTIMIZER = auto()
 
 
 class TaskStatus(Enum):
