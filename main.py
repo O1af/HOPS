@@ -32,7 +32,7 @@ def main():
     with open(args.config) as f:
         config = yaml.safe_load(f)
 
-    np.random.seed(config["simulation"]["seed"])
+    rng = np.random.default_rng(config["simulation"]["seed"])
 
     # Build components
     topology = Topology.from_yaml(config["hardware"])
@@ -54,12 +54,13 @@ def main():
         scheduler,
         collector,
         activation_size_mb,
+        rng=rng,
     )
 
     # Optional failure injection
     if config.get("failure", {}).get("enabled", False):
         pipeline.set_failure_engine(
-            FailureEngine(engine, topology, collector, config["failure"])
+            FailureEngine(engine, topology, collector, config["failure"], rng=rng)
         )
 
     # Run simulation

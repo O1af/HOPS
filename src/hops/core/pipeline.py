@@ -2,6 +2,8 @@
 
 from dataclasses import dataclass
 
+import numpy as np
+
 from hops.core.event_engine import EventEngine
 from hops.core.scheduler import PipelineState, Scheduler
 from hops.core.timing import TimingModel
@@ -21,7 +23,8 @@ class Pipeline:
     def __init__(self, stages: list[Stage], engine: EventEngine,
                  topology, compute_model,
                  scheduler: Scheduler, collector: MetricsCollector,
-                 activation_size_mb: float = 50.0):
+                 activation_size_mb: float = 50.0,
+                 rng: np.random.Generator | None = None):
         self.stages = {s.id: s for s in stages}
         self.stage_order = [s.id for s in stages]
         self._stage_index = {sid: i for i, sid in enumerate(self.stage_order)}
@@ -29,7 +32,8 @@ class Pipeline:
         self.scheduler = scheduler
         self.collector = collector
         self.activation_size_mb = activation_size_mb
-        self.timing_model = TimingModel(topology, compute_model)
+        self.rng = rng if rng is not None else np.random.default_rng()
+        self.timing_model = TimingModel(topology, compute_model, self.rng)
 
         self._state = PipelineState(num_stages=len(stages), num_microbatches=0)
         self._batch_done_count = 0

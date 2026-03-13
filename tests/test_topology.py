@@ -1,5 +1,7 @@
 """Tests for hardware topology."""
 
+import numpy as np
+
 from hops.hardware.device import Device
 from hops.hardware.network import Link
 from hops.hardware.topology import Topology
@@ -16,17 +18,19 @@ def test_device_from_yaml():
 
 
 def test_link_transfer_time_positive():
+    rng = np.random.default_rng(0)
     link = Link("a", "b", bandwidth_gbps=100.0, base_latency_us=5.0,
                 jitter=Constant(0.0))
-    t = link.sample_transfer_time(50.0)
+    t = link.sample_transfer_time(50.0, rng)
     assert t > 0.0
 
 
 def test_link_transfer_time_scales_with_size():
+    rng = np.random.default_rng(0)
     link = Link("a", "b", bandwidth_gbps=100.0, base_latency_us=0.0,
                 jitter=Constant(0.0))
-    t1 = link.sample_transfer_time(10.0)
-    t2 = link.sample_transfer_time(20.0)
+    t1 = link.sample_transfer_time(10.0, rng)
+    t2 = link.sample_transfer_time(20.0, rng)
     assert abs(t2 - 2 * t1) < 1e-10
 
 
@@ -54,4 +58,5 @@ def test_same_device_link_is_free():
         [],
     )
     link = topo.link("gpu0", "gpu0")
-    assert link.sample_transfer_time(100.0) == 0.0
+    rng = np.random.default_rng(0)
+    assert link.sample_transfer_time(100.0, rng) == 0.0

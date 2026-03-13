@@ -15,7 +15,8 @@ from hops.latency.distributions import Constant
 from hops.metrics.collector import MetricsCollector
 
 
-def _make_failure_setup(device_fail_prob=0.0, check_interval=1.0):
+def _make_failure_setup(device_fail_prob=0.0, check_interval=1.0, seed=0):
+    rng = np.random.default_rng(seed)
     devices = [Device("gpu0", "gpu", 8192)]
     topology = Topology(devices, [])
     collector = MetricsCollector()
@@ -26,19 +27,17 @@ def _make_failure_setup(device_fail_prob=0.0, check_interval=1.0):
         "link_fail_prob": 0.0,
         "recovery_time": 2.0,
     }
-    failure_engine = FailureEngine(engine, topology, collector, config)
+    failure_engine = FailureEngine(engine, topology, collector, config, rng=rng)
     return engine, failure_engine, collector
 
 
 def test_no_failures_with_zero_prob():
-    np.random.seed(0)
     engine, fe, collector = _make_failure_setup(device_fail_prob=0.0)
     engine.run(until=10.0)
     assert len(collector.failures) == 0
 
 
 def test_failures_with_high_prob():
-    np.random.seed(0)
     engine, fe, collector = _make_failure_setup(device_fail_prob=1.0)
     engine.run(until=5.0)
     assert len(collector.failures) > 0
@@ -46,7 +45,6 @@ def test_failures_with_high_prob():
 
 def test_recovery_clears_failed_state():
     """After failure + recovery, device should be not-failed (before next check)."""
-    np.random.seed(0)
     engine, fe, collector = _make_failure_setup(
         device_fail_prob=1.0, check_interval=100.0)
 
@@ -57,6 +55,7 @@ def test_recovery_clears_failed_state():
 
 
 def test_device_failure_delays_compute_start():
+    rng = np.random.default_rng(0)
     devices = [Device("gpu0", "gpu", 8192)]
     topology = Topology(devices, [])
     collector = MetricsCollector()
@@ -69,13 +68,14 @@ def test_device_failure_delays_compute_start():
         GPipeScheduler(),
         collector,
         activation_size_mb=0.0,
+        rng=rng,
     )
     failure_engine = FailureEngine(engine, topology, collector, {
         "check_interval": 1000.0,
         "device_fail_prob": 0.0,
         "link_fail_prob": 0.0,
         "recovery_time": 10.0,
-    })
+    }, rng=rng)
     pipeline.set_failure_engine(failure_engine)
 
     engine.schedule(Event(
@@ -91,6 +91,7 @@ def test_device_failure_delays_compute_start():
 
 
 def test_link_failure_delays_transfer_start():
+    rng = np.random.default_rng(0)
     devices = [Device("gpu0", "gpu", 8192), Device("gpu1", "gpu", 8192)]
     topology = Topology(devices, [Link("gpu0", "gpu1", 1000, 0.0, Constant(0.0))])
     collector = MetricsCollector()
@@ -103,13 +104,14 @@ def test_link_failure_delays_transfer_start():
         GPipeScheduler(),
         collector,
         activation_size_mb=10.0,
+        rng=rng,
     )
     failure_engine = FailureEngine(engine, topology, collector, {
         "check_interval": 1000.0,
         "device_fail_prob": 0.0,
         "link_fail_prob": 0.0,
         "recovery_time": 15.0,
-    })
+    }, rng=rng)
     pipeline.set_failure_engine(failure_engine)
 
     engine.schedule(Event(
@@ -125,6 +127,7 @@ def test_link_failure_delays_transfer_start():
 
 
 def test_failure_enabled_batch_run_stops_when_pipeline_finishes():
+    rng = np.random.default_rng(0)
     devices = [Device("gpu0", "gpu", 8192), Device("gpu1", "gpu", 8192)]
     links = [
         Link("gpu0", "gpu1", 1000, 0.0, Constant(0.0)),
@@ -141,13 +144,14 @@ def test_failure_enabled_batch_run_stops_when_pipeline_finishes():
         GPipeScheduler(),
         collector,
         activation_size_mb=0.0,
+        rng=rng,
     )
     failure_engine = FailureEngine(engine, topology, collector, {
         "check_interval": 1.0,
         "device_fail_prob": 1.0,
         "link_fail_prob": 1.0,
         "recovery_time": 100.0,
-    })
+    }, rng=rng)
     pipeline.set_failure_engine(failure_engine)
 
     pipeline.start_batch(1)

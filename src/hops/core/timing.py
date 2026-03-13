@@ -1,5 +1,7 @@
 """Timing and resource availability helpers for pipeline execution."""
 
+import numpy as np
+
 from hops.core.types import Phase
 from hops.hardware.topology import Topology
 from hops.latency.compute_model import ComputeModel
@@ -8,9 +10,11 @@ from hops.latency.compute_model import ComputeModel
 class TimingModel:
     """Current sequential compute/transfer timing with failure-aware delays."""
 
-    def __init__(self, topology: Topology, compute_model: ComputeModel):
+    def __init__(self, topology: Topology, compute_model: ComputeModel,
+                 rng: np.random.Generator):
         self.topology = topology
         self.compute_model = compute_model
+        self.rng = rng
         self.failure_engine = None
 
     def set_failure_engine(self, failure_engine) -> None:
@@ -28,7 +32,7 @@ class TimingModel:
         if start_time > now:
             return start_time, start_time
 
-        duration = self.compute_model.sample(stage_id, phase)
+        duration = self.compute_model.sample(stage_id, phase, self.rng)
         end_time = start_time + duration
         device.busy_until = end_time
         return start_time, end_time
@@ -45,5 +49,5 @@ class TimingModel:
             return start_time, start_time
 
         link = self.topology.link(src_device, dst_device)
-        end_time = start_time + link.sample_transfer_time(size_mb)
+        end_time = start_time + link.sample_transfer_time(size_mb, self.rng)
         return start_time, end_time

@@ -2,8 +2,11 @@
 
 import pytest
 
-from hops.core.scheduler import GPipeScheduler, OneFOneBScheduler, make_scheduler
-from hops.core.types import Phase
+from hops.core.scheduler import (
+    GPipeScheduler, OneFOneBScheduler, Scheduler, PipelineState,
+    make_scheduler, register_scheduler, _SCHEDULER_REGISTRY,
+)
+from hops.core.types import Phase, StageTask
 
 from .conftest import make_test_pipeline
 
@@ -51,6 +54,36 @@ def test_make_scheduler_factory():
 def test_make_scheduler_unknown_raises():
     with pytest.raises(ValueError):
         make_scheduler({"policy": "unknown"})
+
+
+def test_register_custom_scheduler():
+    """register_scheduler makes a custom policy available via make_scheduler."""
+
+    class NullScheduler(Scheduler):
+        def next_tasks(self, state: PipelineState) -> list[StageTask]:
+            return []
+
+    register_scheduler("null", NullScheduler)
+    try:
+        sched = make_scheduler({"policy": "null"})
+        assert isinstance(sched, NullScheduler)
+    finally:
+        _SCHEDULER_REGISTRY.pop("null", None)
+
+
+def test_register_scheduler_overwrites():
+    """Registering with an existing name replaces the entry."""
+
+    class MyGPipe(Scheduler):
+        def next_tasks(self, state: PipelineState) -> list[StageTask]:
+            return []
+
+    original = _SCHEDULER_REGISTRY["gpipe"]
+    register_scheduler("gpipe", MyGPipe)
+    try:
+        assert isinstance(make_scheduler({"policy": "gpipe"}), MyGPipe)
+    finally:
+        _SCHEDULER_REGISTRY["gpipe"] = original
 
 
 def test_all_microbatches_complete():
