@@ -196,6 +196,15 @@ class Pipeline:
             for i in range(len(unique_devices) - 1):
                 pairs.append((unique_devices[i], unique_devices[i + 1]))
                 pairs.append((unique_devices[i + 1], unique_devices[i]))
+            # Validate all required links exist before scheduling
+            for src, dst in pairs:
+                try:
+                    self.topology.link(src, dst)
+                except KeyError:
+                    raise ValueError(
+                        f"Optimizer all-reduce requires a link from {src!r} to {dst!r}, "
+                        f"but none exists in the topology"
+                    )
             self._allreduce_pending = len(pairs)
             for src, dst in pairs:
                 self.engine.schedule(Event(
@@ -229,7 +238,7 @@ class Pipeline:
     def _on_allreduce_end(self, event: Event, engine: EventEngine) -> None:
         transfer_start = event.payload["transfer_start"]
         self.collector.record_transfer(
-            -1, Phase.OPTIMIZER,
+            None, Phase.OPTIMIZER,
             event.payload["src_device"], event.payload["dst_device"],
             transfer_start, engine.now)
 
@@ -251,16 +260,21 @@ class Pipeline:
 
     def _on_optimizer_start(self, event: Event, engine: EventEngine) -> None:
         device_id = event.payload["device_id"]
-        device = self.topology.device(device_id)
-        start_time = max(engine.now, device.busy_until)
+        # Sample duration once and carry it in the payload across retries
+        duration = event.payload.get("duration")
+        if duration is None:
+            duration = self.optimizer_latency.sample(self.rng)
+
+        start_time, end_time = self.timing_model.reserve_device(
+            now=engine.now, device_id=device_id, duration=duration,
+        )
         if start_time > engine.now:
-            engine.schedule(Event(time=start_time, kind=EventKind.OPTIMIZER_START,
-                                  payload=event.payload))
+            engine.schedule(Event(
+                time=start_time, kind=EventKind.OPTIMIZER_START,
+                payload={"device_id": device_id, "duration": duration},
+            ))
             return
 
-        duration = self.optimizer_latency.sample(self.rng)
-        end_time = start_time + duration
-        device.busy_until = end_time
         engine.schedule(Event(
             time=end_time,
             kind=EventKind.OPTIMIZER_END,
@@ -273,7 +287,7 @@ class Pipeline:
         # Find a stage_id for this device (for metrics)
         stage_id = next(sid for sid in self.stage_order
                         if self.stages[sid].device_id == device_id)
-        self.collector.record_compute(stage_id, -1, Phase.OPTIMIZER, device_id,
+        self.collector.record_compute(stage_id, None, Phase.OPTIMIZER, device_id,
                                       start_time, engine.now)
         self._optimizer_pending -= 1
 

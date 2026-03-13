@@ -41,8 +41,8 @@ def draw_timeline(collector: MetricsCollector, output_path: str) -> None:
         color = COLORS[r.phase]
         ax.barh(y, width, left=r.start_time, height=0.6, color=color,
                 edgecolor="white", linewidth=0.5)
-        # Label with microbatch id
-        if width > 0.5:
+        # Label with microbatch id (skip for optimizer records)
+        if width > 0.5 and r.microbatch_id is not None:
             ax.text(r.start_time + width / 2, y, str(r.microbatch_id),
                     ha="center", va="center", fontsize=7, color="white")
 

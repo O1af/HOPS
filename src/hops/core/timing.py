@@ -37,6 +37,23 @@ class TimingModel:
         device.busy_until = end_time
         return start_time, end_time
 
+    def reserve_device(self, *, now: float, device_id: str,
+                       duration: float) -> tuple[float, float]:
+        """Reserve a device for a fixed duration, respecting failures."""
+        device = self.topology.device(device_id)
+        start_time = max(now, device.busy_until)
+        if self.failure_engine is not None:
+            recovery_time = self.failure_engine.next_device_recovery_time(device_id)
+            if recovery_time is not None and recovery_time > start_time:
+                start_time = recovery_time
+
+        if start_time > now:
+            return start_time, start_time
+
+        end_time = start_time + duration
+        device.busy_until = end_time
+        return start_time, end_time
+
     def reserve_transfer(self, *, now: float, src_device: str, dst_device: str,
                          size_mb: float) -> tuple[float, float]:
         start_time = now

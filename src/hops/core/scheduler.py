@@ -155,6 +155,10 @@ _SCHEDULER_REGISTRY: dict[str, type[Scheduler]] = {
 
 def register_scheduler(name: str, cls: type[Scheduler]) -> None:
     """Register a custom scheduling policy by name."""
+    if not isinstance(cls, type) or not issubclass(cls, Scheduler):
+        raise TypeError(
+            f"Expected a Scheduler subclass, got {cls!r}"
+        )
     _SCHEDULER_REGISTRY[name] = cls
 
 
