@@ -9,6 +9,7 @@ from hops.core.scheduler import make_scheduler
 from hops.failure.engine import FailureEngine
 from hops.hardware.topology import Topology
 from hops.latency.compute_model import ComputeModel
+from hops.latency.distributions import Distribution
 from hops.metrics.collector import MetricsCollector
 from hops.metrics.reporter import Reporter
 from hops.viz.dashboard import draw_dashboard
@@ -32,7 +33,7 @@ def main():
     with open(args.config) as f:
         config = yaml.safe_load(f)
 
-    np.random.seed(config["simulation"]["seed"])
+    rng = np.random.default_rng(config["simulation"]["seed"])
 
     # Build components
     topology = Topology.from_yaml(config["hardware"])
@@ -46,6 +47,15 @@ def main():
     ]
 
     activation_size_mb = config["hardware"].get("activation_size_mb", 50.0)
+
+    # Optional optimizer step
+    opt_cfg = config.get("optimizer", {})
+    optimizer_latency = None
+    gradient_size_mb = 0.0
+    if opt_cfg.get("enabled", False):
+        optimizer_latency = Distribution.from_yaml(opt_cfg["compute_latency"])
+        gradient_size_mb = opt_cfg.get("gradient_size_mb", 0.0)
+
     pipeline = Pipeline(
         stages,
         engine,
@@ -54,12 +64,15 @@ def main():
         scheduler,
         collector,
         activation_size_mb,
+        rng=rng,
+        optimizer_latency=optimizer_latency,
+        gradient_size_mb=gradient_size_mb,
     )
 
     # Optional failure injection
     if config.get("failure", {}).get("enabled", False):
         pipeline.set_failure_engine(
-            FailureEngine(engine, topology, collector, config["failure"])
+            FailureEngine(engine, topology, collector, config["failure"], rng=rng)
         )
 
     # Run simulation

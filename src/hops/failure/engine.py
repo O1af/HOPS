@@ -12,10 +12,12 @@ class FailureEngine:
     """Periodically checks for and injects device/link failures."""
 
     def __init__(self, engine: EventEngine, topology: Topology,
-                 collector: MetricsCollector, config: dict):
+                 collector: MetricsCollector, config: dict,
+                 rng: np.random.Generator):
         self.engine = engine
         self.topology = topology
         self.collector = collector
+        self.rng = rng
         self.check_interval = config.get("check_interval", 10.0)
         self.device_fail_prob = config.get("device_fail_prob", 0.001)
         self.link_fail_prob = config.get("link_fail_prob", 0.0005)
@@ -69,7 +71,7 @@ class FailureEngine:
         for device_id in self.topology.devices:
             if device_id in self._failed_devices:
                 continue
-            if np.random.random() < self.device_fail_prob:
+            if self.rng.random() < self.device_fail_prob:
                 engine.schedule(Event(
                     time=engine.now,
                     kind=EventKind.FAILURE,
@@ -78,7 +80,7 @@ class FailureEngine:
         for src, dst in self.topology.links:
             if (src, dst) in self._failed_links:
                 continue
-            if np.random.random() < self.link_fail_prob:
+            if self.rng.random() < self.link_fail_prob:
                 engine.schedule(Event(
                     time=engine.now,
                     kind=EventKind.FAILURE,

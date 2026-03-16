@@ -18,7 +18,7 @@ def test_default_config_runs():
     with open("configs/default.yaml") as f:
         config = yaml.safe_load(f)
 
-    np.random.seed(config["simulation"]["seed"])
+    rng = np.random.default_rng(config["simulation"]["seed"])
     topology = Topology.from_yaml(config["hardware"])
     compute_model = ComputeModel.from_yaml(config["pipeline"])
     collector = MetricsCollector()
@@ -30,7 +30,8 @@ def test_default_config_runs():
     ]
     pipeline = Pipeline(stages, engine, topology, compute_model,
                         OneFOneBScheduler(), collector,
-                        config["hardware"].get("activation_size_mb", 50.0))
+                        config["hardware"].get("activation_size_mb", 50.0),
+                        rng=rng)
 
     num_batches = config["simulation"]["num_batches"]
     num_mb = config["simulation"]["num_microbatches"]

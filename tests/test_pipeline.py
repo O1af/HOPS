@@ -2,8 +2,16 @@
 
 import numpy as np
 
+from hops.core.event_engine import EventEngine
+from hops.core.pipeline import Pipeline, Stage
 from hops.core.scheduler import GPipeScheduler, OneFOneBScheduler
 from hops.core.types import Phase
+from hops.hardware.device import Device
+from hops.hardware.network import Link
+from hops.hardware.topology import Topology
+from hops.latency.compute_model import ComputeModel
+from hops.latency.distributions import Constant
+from hops.metrics.collector import MetricsCollector
 
 from .conftest import make_test_pipeline
 
@@ -135,3 +143,49 @@ def test_1f1b_last_stage_sequence_matches_warmup_steady_flush_pattern():
         (Phase.FORWARD, 4.0, 5.0),
         (Phase.BACKWARD, 5.0, 7.0),
     ]
+
+
+def test_optimizer_step_adds_time():
+    """With optimizer enabled, batch should take longer than without."""
+    rng = np.random.default_rng(0)
+    num_stages = 2
+    devices = [Device(f"gpu{i}", "gpu", 8192) for i in range(num_stages)]
+    links = [
+        Link("gpu0", "gpu1", 900, 0.0, Constant(0.0)),
+        Link("gpu1", "gpu0", 900, 0.0, Constant(0.0)),
+    ]
+    topology = Topology(devices, links)
+    compute_model = ComputeModel({i: Constant(5.0) for i in range(num_stages)})
+    collector = MetricsCollector()
+    engine = EventEngine()
+
+    pipeline = Pipeline(
+        [Stage(i, f"gpu{i}") for i in range(num_stages)],
+        engine, topology, compute_model, GPipeScheduler(), collector,
+        activation_size_mb=0.0, rng=rng,
+        optimizer_latency=Constant(10.0), gradient_size_mb=50.0,
+    )
+    pipeline.start_batch(1)
+    engine.run(stop_condition=lambda: pipeline.batch_complete)
+
+    # Verify optimizer compute and all-reduce transfer records exist
+    opt_computes = [r for r in collector.computes if r.phase == Phase.OPTIMIZER]
+    opt_transfers = [t for t in collector.transfers if t.phase == Phase.OPTIMIZER]
+    assert len(opt_computes) == num_stages  # one per device
+    assert len(opt_transfers) == 2 * (num_stages - 1)  # bidirectional adjacent pairs
+
+    # Total time should be > fwd+bwd alone (30ms for 1MB, 2 stages, constant 5ms)
+    makespan = collector.makespan()
+    assert makespan > 30.0
+
+
+def test_optimizer_disabled_by_default():
+    """Without optimizer config, batch completes normally."""
+    engine, pipeline, collector = make_test_pipeline(
+        GPipeScheduler(), num_stages=2, compute_time=10.0, seed=0)
+    pipeline.start_batch(1)
+    engine.run(stop_condition=lambda: pipeline.batch_complete)
+
+    opt_computes = [r for r in collector.computes if r.phase == Phase.OPTIMIZER]
+    assert len(opt_computes) == 0
+    assert pipeline.batch_complete

@@ -19,7 +19,7 @@ def make_test_pipeline(scheduler: Scheduler, *, num_stages: int = 4,
 
     Returns (engine, pipeline, collector).
     """
-    np.random.seed(seed)
+    rng = np.random.default_rng(seed)
     devices = [Device(f"gpu{i}", "gpu", 8192) for i in range(num_stages)]
     links = []
     for i in range(num_stages - 1):
@@ -34,5 +34,5 @@ def make_test_pipeline(scheduler: Scheduler, *, num_stages: int = 4,
 
     stages = [Stage(i, f"gpu{i}") for i in range(num_stages)]
     pipeline = Pipeline(stages, engine, topology, compute_model, scheduler,
-                        collector, activation_size_mb=0.0)
+                        collector, activation_size_mb=0.0, rng=rng)
     return engine, pipeline, collector

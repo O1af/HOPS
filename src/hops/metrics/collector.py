@@ -1,5 +1,7 @@
 """Runtime statistics accumulation."""
 
+from __future__ import annotations
+
 from dataclasses import dataclass
 
 from hops.core.types import Phase
@@ -8,7 +10,7 @@ from hops.core.types import Phase
 @dataclass
 class ComputeRecord:
     stage_id: int
-    microbatch_id: int
+    microbatch_id: int | None
     phase: Phase
     device_id: str
     start_time: float
@@ -17,7 +19,7 @@ class ComputeRecord:
 
 @dataclass
 class TransferRecord:
-    microbatch_id: int
+    microbatch_id: int | None
     phase: Phase
     src_device: str
     dst_device: str
@@ -50,18 +52,19 @@ class MetricsCollector:
         self._mb_start_times: dict[int, float] = {}
         self._mb_completion_times: dict[int, float] = {}
 
-    def record_compute(self, stage_id: int, microbatch_id: int, phase: Phase,
+    def record_compute(self, stage_id: int, microbatch_id: int | None, phase: Phase,
                        device_id: str, start_time: float, end_time: float) -> None:
         self.computes.append(ComputeRecord(
             stage_id, microbatch_id, phase, device_id, start_time, end_time))
-        # Track per-microbatch start/end for e2e latency
-        if microbatch_id not in self._mb_start_times:
-            self._mb_start_times[microbatch_id] = start_time
-        else:
-            self._mb_start_times[microbatch_id] = min(
-                self._mb_start_times[microbatch_id], start_time)
+        # Track per-microbatch start/end for e2e latency (skip optimizer records)
+        if microbatch_id is not None:
+            if microbatch_id not in self._mb_start_times:
+                self._mb_start_times[microbatch_id] = start_time
+            else:
+                self._mb_start_times[microbatch_id] = min(
+                    self._mb_start_times[microbatch_id], start_time)
 
-    def record_transfer(self, microbatch_id: int, phase: Phase,
+    def record_transfer(self, microbatch_id: int | None, phase: Phase,
                         src: str, dst: str, start: float, end: float) -> None:
         self.transfers.append(TransferRecord(
             microbatch_id, phase, src, dst, start, end))

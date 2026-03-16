@@ -2,6 +2,7 @@
 
 import numpy as np
 
+from hops.core.types import Phase
 from hops.metrics.collector import MetricsCollector
 
 
@@ -40,6 +41,15 @@ class Reporter:
         total_transfer = c.total_transfer_time()
         if total_compute > 0 and c.transfers:
             print(f"\nCommunication overhead: {total_transfer / total_compute:.2%} of compute")
+
+        optimizer_compute = sum(
+            r.end_time - r.start_time for r in c.computes if r.phase == Phase.OPTIMIZER)
+        optimizer_transfer = sum(
+            t.end_time - t.start_time for t in c.transfers if t.phase == Phase.OPTIMIZER)
+        if optimizer_compute > 0 or optimizer_transfer > 0:
+            print(f"\nOptimizer step:")
+            print(f"  All-reduce time: {optimizer_transfer:.2f} ms")
+            print(f"  Weight update time: {optimizer_compute:.2f} ms")
 
         if c.failures:
             print(f"\nFailures: {len(c.failures)}")

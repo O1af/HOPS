@@ -147,13 +147,24 @@ class OneFOneBScheduler(Scheduler):
         return tasks
 
 
+_SCHEDULER_REGISTRY: dict[str, type[Scheduler]] = {
+    "gpipe": GPipeScheduler,
+    "1f1b": OneFOneBScheduler,
+}
+
+
+def register_scheduler(name: str, cls: type[Scheduler]) -> None:
+    """Register a custom scheduling policy by name."""
+    if not isinstance(cls, type) or not issubclass(cls, Scheduler):
+        raise TypeError(
+            f"Expected a Scheduler subclass, got {cls!r}"
+        )
+    _SCHEDULER_REGISTRY[name] = cls
+
+
 def make_scheduler(config: dict) -> Scheduler:
     """Factory function to create a scheduler from config."""
     policy = config["policy"]
-    schedulers = {
-        "gpipe": GPipeScheduler,
-        "1f1b": OneFOneBScheduler,
-    }
-    if policy not in schedulers:
-        raise ValueError(f"Unknown scheduler policy: {policy}. Options: {list(schedulers)}")
-    return schedulers[policy]()
+    if policy not in _SCHEDULER_REGISTRY:
+        raise ValueError(f"Unknown scheduler policy: {policy}. Options: {list(_SCHEDULER_REGISTRY)}")
+    return _SCHEDULER_REGISTRY[policy]()

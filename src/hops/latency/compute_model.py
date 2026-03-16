@@ -1,5 +1,7 @@
 """Per-stage computation time modeling."""
 
+import numpy as np
+
 from hops.core.types import Phase
 from hops.latency.distributions import Distribution
 
@@ -12,8 +14,8 @@ class ComputeModel:
         self._dists = stage_distributions
         self._backward_factor = backward_factor
 
-    def sample(self, stage_id: int, phase: Phase) -> float:
-        base = self._dists[stage_id].sample()
+    def sample(self, stage_id: int, phase: Phase, rng: np.random.Generator) -> float:
+        base = self._dists[stage_id].sample(rng)
         if phase == Phase.BACKWARD:
             base *= self._backward_factor
         return base
