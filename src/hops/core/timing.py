@@ -8,7 +8,13 @@ from hops.latency.compute_model import ComputeModel
 
 
 class TimingModel:
-    """Current sequential compute/transfer timing with failure-aware delays."""
+    """Compute/transfer timing with failure-aware delays and bandwidth contention.
+
+    Compute and transfer resources are independent — a device can compute
+    while simultaneously sending/receiving data (overlap).  Bandwidth
+    contention is modelled per-link: concurrent transfers share the link's
+    bandwidth equally (estimated at transfer start time).
+    """
 
     def __init__(self, topology: Topology, compute_model: ComputeModel,
                  rng: np.random.Generator):
@@ -56,6 +62,10 @@ class TimingModel:
 
     def reserve_transfer(self, *, now: float, src_device: str, dst_device: str,
                          size_mb: float) -> tuple[float, float]:
+        """Reserve a link for a transfer with contention-aware bandwidth.
+
+        Transfers do NOT block device compute (overlap is allowed).
+        """
         start_time = now
         if self.failure_engine is not None:
             recovery_time = self.failure_engine.next_link_recovery_time(src_device, dst_device)
@@ -66,5 +76,15 @@ class TimingModel:
             return start_time, start_time
 
         link = self.topology.link(src_device, dst_device)
-        end_time = start_time + link.sample_transfer_time(size_mb, self.rng)
+        link.active_transfers += 1
+        effective_bw = link.bandwidth_gbps / link.active_transfers
+        base_ms = link.base_latency_us / 1000.0
+        transfer_ms = (size_mb * 8.0) / effective_bw
+        duration = base_ms + transfer_ms + link.jitter.sample(self.rng)
+        end_time = start_time + duration
         return start_time, end_time
+
+    def release_transfer(self, src_device: str, dst_device: str) -> None:
+        """Decrement active transfer count on a link after transfer completes."""
+        link = self.topology.link(src_device, dst_device)
+        link.active_transfers = max(0, link.active_transfers - 1)

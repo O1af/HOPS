@@ -21,6 +21,8 @@ class EventKind(Enum):
 class Phase(Enum):
     FORWARD = auto()
     BACKWARD = auto()
+    BACKWARD_B = auto()  # activation gradient (ZeroBubble W-split)
+    BACKWARD_W = auto()  # weight gradient (ZeroBubble W-split, deferrable)
     OPTIMIZER = auto()
 
 

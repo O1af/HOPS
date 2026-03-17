@@ -13,12 +13,17 @@ class PipelineState:
     task_states: dict[tuple[int, int, Phase], TaskStatus] = field(default_factory=dict)
 
     @classmethod
-    def initialize(cls, num_stages: int, num_microbatches: int) -> "PipelineState":
+    def initialize(cls, num_stages: int, num_microbatches: int,
+                   use_w_split: bool = False) -> "PipelineState":
         task_states = {}
         for mb in range(num_microbatches):
             for stage in range(num_stages):
                 task_states[(stage, mb, Phase.FORWARD)] = TaskStatus.WAITING
-                task_states[(stage, mb, Phase.BACKWARD)] = TaskStatus.WAITING
+                if use_w_split:
+                    task_states[(stage, mb, Phase.BACKWARD_B)] = TaskStatus.WAITING
+                    task_states[(stage, mb, Phase.BACKWARD_W)] = TaskStatus.WAITING
+                else:
+                    task_states[(stage, mb, Phase.BACKWARD)] = TaskStatus.WAITING
             task_states[(0, mb, Phase.FORWARD)] = TaskStatus.READY
         return cls(
             num_stages=num_stages,
@@ -27,11 +32,12 @@ class PipelineState:
         )
 
     def is_task_ready(self, stage_id: int, microbatch_id: int, phase: Phase) -> bool:
-        return self.task_states[(stage_id, microbatch_id, phase)] == TaskStatus.READY
+        key = (stage_id, microbatch_id, phase)
+        return key in self.task_states and self.task_states[key] == TaskStatus.READY
 
     def mark_ready(self, stage_id: int, microbatch_id: int, phase: Phase) -> None:
         key = (stage_id, microbatch_id, phase)
-        if self.task_states[key] != TaskStatus.COMPLETED:
+        if key in self.task_states and self.task_states[key] != TaskStatus.COMPLETED:
             self.task_states[key] = TaskStatus.READY
 
     def reserve_task(self, stage_id: int, microbatch_id: int, phase: Phase) -> None:
@@ -147,9 +153,83 @@ class OneFOneBScheduler(Scheduler):
         return tasks
 
 
+class ZeroBubbleScheduler(Scheduler):
+    """ZeroBubble: splits backward into B (activation grad) and W (weight grad).
+
+    W tasks have no downstream dependency and are deferred to fill bubbles.
+    Three phases per stage:
+      - Warmup:   issue (num_stages - stage_idx) forwards
+      - Steady:   alternate F, B — W only runs when both F and B are blocked
+      - Cooldown: finish remaining B tasks, then drain all deferred W tasks
+    """
+
+    def next_tasks(self, state: PipelineState) -> list[StageTask]:
+        tasks = []
+        s = state
+
+        for stage in range(s.num_stages):
+            if s.stage_is_busy(stage):
+                continue
+
+            fwd_done = s.completed_count(stage, Phase.FORWARD)
+            b_done = s.completed_count(stage, Phase.BACKWARD_B)
+            w_done = s.completed_count(stage, Phase.BACKWARD_W)
+
+            warmup_limit = s.num_stages - stage
+            all_fwd_done = fwd_done >= s.num_microbatches
+            all_b_done = b_done >= s.num_microbatches
+
+            # ── Cooldown: all F and B done → drain deferred W tasks ──
+            if all_fwd_done and all_b_done:
+                if w_done < b_done:
+                    mb = w_done
+                    if s.is_task_ready(stage, mb, Phase.BACKWARD_W):
+                        tasks.append(StageTask(mb, stage, Phase.BACKWARD_W))
+                continue
+
+            # ── Priority 1: BACKWARD_B — keeps the pipeline moving ──
+            if fwd_done >= warmup_limit and b_done < fwd_done:
+                mb = b_done
+                if s.is_task_ready(stage, mb, Phase.BACKWARD_B):
+                    tasks.append(StageTask(mb, stage, Phase.BACKWARD_B))
+                    continue
+
+            # ── Priority 2: FORWARD — feeds the pipeline ──
+            if fwd_done < s.num_microbatches:
+                mb = fwd_done
+                if s.is_task_ready(stage, mb, Phase.FORWARD):
+                    tasks.append(StageTask(mb, stage, Phase.FORWARD))
+                    continue
+
+            # ── Bubble fill: neither F nor B is ready → run a deferred W ──
+            if w_done < b_done:
+                mb = w_done
+                if s.is_task_ready(stage, mb, Phase.BACKWARD_W):
+                    tasks.append(StageTask(mb, stage, Phase.BACKWARD_W))
+                    continue
+
+            # ── Fallback: try B if available ──
+            if b_done < s.num_microbatches and fwd_done > b_done:
+                mb = b_done
+                if s.is_task_ready(stage, mb, Phase.BACKWARD_B):
+                    tasks.append(StageTask(mb, stage, Phase.BACKWARD_B))
+
+        return tasks
+
+
+def max_in_flight_count(policy: str, stage_idx: int,
+                        num_stages: int, num_microbatches: int) -> int:
+    """Upper bound on simultaneous activations stored at a stage."""
+    if policy == "gpipe":
+        return num_microbatches
+    # 1F1B and ZeroBubble: bounded by pipeline depth
+    return min(num_stages - stage_idx, num_microbatches)
+
+
 _SCHEDULER_REGISTRY: dict[str, type[Scheduler]] = {
     "gpipe": GPipeScheduler,
     "1f1b": OneFOneBScheduler,
+    "zero_bubble": ZeroBubbleScheduler,
 }
 
 
