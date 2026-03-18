@@ -167,6 +167,17 @@ class TestMemory:
         with pytest.raises(ValueError, match="exceeds device capacity"):
             validate_memory(topology, stage_configs, "gpipe", 8, 50.0, Precision.FP32)
 
+    def test_memory_validation_aggregates_shared_device_usage(self):
+        from main import validate_memory
+        devices = [Device("gpu0", "gpu", 3000)]
+        topology = Topology(devices, [])
+        stage_configs = [
+            {"id": 0, "device": "gpu0", "memory_mb": 1200},
+            {"id": 1, "device": "gpu0", "memory_mb": 1200},
+        ]
+        with pytest.raises(ValueError, match="Device gpu0"):
+            validate_memory(topology, stage_configs, "1f1b", 4, 250.0, Precision.FP32)
+
     def test_max_in_flight_count(self):
         assert max_in_flight_count("gpipe", 0, 4, 8) == 8
         assert max_in_flight_count("1f1b", 0, 4, 8) == 4
@@ -440,3 +451,44 @@ class TestZeroBubbleMixedPrecision:
 
         assert collector.completed_microbatches == 8
         assert pipeline.activation_size_mb == 50.0
+
+
+class TestConfigurationValidation:
+    def test_pipeline_rejects_non_contiguous_stage_ids(self):
+        rng = np.random.default_rng(0)
+        topology = Topology([Device("gpu0", "gpu", 8192)], [])
+        collector = MetricsCollector()
+        engine = EventEngine()
+
+        with pytest.raises(ValueError, match="contiguous zero-based"):
+            Pipeline(
+                [Stage(1, "gpu0")],
+                engine,
+                topology,
+                ComputeModel({1: Constant(5.0)}),
+                GPipeScheduler(),
+                collector,
+                activation_size_mb=0.0,
+                rng=rng,
+            )
+
+    def test_pipeline_rejects_missing_backward_link(self):
+        rng = np.random.default_rng(0)
+        topology = Topology(
+            [Device("gpu0", "gpu", 8192), Device("gpu1", "gpu", 8192)],
+            [Link("gpu0", "gpu1", 900, 0.0, Constant(0.0))],
+        )
+        collector = MetricsCollector()
+        engine = EventEngine()
+
+        with pytest.raises(ValueError, match="backward transfer requires a link"):
+            Pipeline(
+                [Stage(0, "gpu0"), Stage(1, "gpu1")],
+                engine,
+                topology,
+                ComputeModel({0: Constant(5.0), 1: Constant(5.0)}),
+                GPipeScheduler(),
+                collector,
+                activation_size_mb=0.0,
+                rng=rng,
+            )

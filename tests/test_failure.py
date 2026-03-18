@@ -93,7 +93,10 @@ def test_device_failure_delays_compute_start():
 def test_link_failure_delays_transfer_start():
     rng = np.random.default_rng(0)
     devices = [Device("gpu0", "gpu", 8192), Device("gpu1", "gpu", 8192)]
-    topology = Topology(devices, [Link("gpu0", "gpu1", 1000, 0.0, Constant(0.0))])
+    topology = Topology(devices, [
+        Link("gpu0", "gpu1", 1000, 0.0, Constant(0.0)),
+        Link("gpu1", "gpu0", 1000, 0.0, Constant(0.0)),
+    ])
     collector = MetricsCollector()
     engine = EventEngine()
     pipeline = Pipeline(

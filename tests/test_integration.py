@@ -1,5 +1,9 @@
 """End-to-end integration tests."""
 
+import builtins
+import importlib
+import sys
+
 import numpy as np
 import yaml
 
@@ -57,3 +61,44 @@ def test_1f1b_less_bubbles_than_gpipe():
 
     assert onefb_bubble <= gpipe_bubble, (
         f"1F1B bubble {onefb_bubble:.2%} should be <= GPipe {gpipe_bubble:.2%}")
+
+
+def test_main_no_viz_does_not_require_matplotlib(tmp_path, monkeypatch):
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        yaml.safe_dump({
+            "simulation": {"num_microbatches": 1, "num_batches": 1, "seed": 0},
+            "pipeline": {
+                "stages": [{
+                    "id": 0,
+                    "device": "gpu0",
+                    "compute_latency": {"type": "constant", "value": 1.0},
+                }],
+            },
+            "scheduler": {"policy": "gpipe"},
+            "hardware": {
+                "devices": [{"id": "gpu0", "kind": "gpu", "memory_mb": 8192}],
+                "activation_size_mb": 0.0,
+            },
+        }),
+        encoding="utf-8",
+    )
+
+    original_import = builtins.__import__
+
+    def guarded_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name.startswith("matplotlib"):
+            raise ModuleNotFoundError(name)
+        return original_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", guarded_import)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["main.py", "--config", str(config_path), "--no-viz"],
+    )
+    for module_name in ("main", "hops.viz.dashboard", "hops.viz.timeline"):
+        sys.modules.pop(module_name, None)
+
+    module = importlib.import_module("main")
+    module.main()

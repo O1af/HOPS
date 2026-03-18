@@ -32,11 +32,13 @@ class Pipeline:
                  gradient_accumulation_steps: int = 1,
                  precision: Precision = Precision.FP32,
                  allreduce_algo: AllreduceAlgo = AllreduceAlgo.NAIVE):
+        self._validate_stage_configuration(stages)
         self.stages = {s.id: s for s in stages}
         self.stage_order = [s.id for s in stages]
         self._stage_index = {sid: i for i, sid in enumerate(self.stage_order)}
         self.engine = engine
         self.topology = topology
+        self._validate_topology_requirements()
         self.scheduler = scheduler
         self.collector = collector
         self.rng = rng if rng is not None else np.random.default_rng()
@@ -69,6 +71,7 @@ class Pipeline:
         for stage_id, mem in self.stage_memory_mb.items():
             device = self.topology.device(self.stages[stage_id].device_id)
             device.allocate(mem * precision.weight_memory_overhead)
+            self.collector.record_peak_memory(device.id, device.peak_memory_mb)
 
         self._state = PipelineState(num_stages=len(stages), num_microbatches=0)
         self._batch_done_count = 0
@@ -95,6 +98,46 @@ class Pipeline:
         engine.on(EventKind.ALLREDUCE_END, self._on_allreduce_end)
         engine.on(EventKind.OPTIMIZER_START, self._on_optimizer_start)
         engine.on(EventKind.OPTIMIZER_END, self._on_optimizer_end)
+
+    @staticmethod
+    def _validate_stage_configuration(stages: list[Stage]) -> None:
+        if not stages:
+            raise ValueError("Pipeline must contain at least one stage")
+
+        stage_ids = [stage.id for stage in stages]
+        if len(set(stage_ids)) != len(stage_ids):
+            raise ValueError(f"Duplicate stage IDs are not allowed: {stage_ids}")
+
+        expected_ids = list(range(len(stages)))
+        if stage_ids != expected_ids:
+            raise ValueError(
+                "Stage IDs must be contiguous zero-based integers in pipeline order. "
+                f"Expected {expected_ids}, got {stage_ids}"
+            )
+
+    def _validate_topology_requirements(self) -> None:
+        for stage in self.stages.values():
+            try:
+                self.topology.device(stage.device_id)
+            except KeyError as exc:
+                raise ValueError(
+                    f"Stage {stage.id} references unknown device {stage.device_id!r}"
+                ) from exc
+
+        for from_stage, to_stage in zip(self.stage_order, self.stage_order[1:]):
+            src = self.stages[from_stage].device_id
+            dst = self.stages[to_stage].device_id
+            for required_src, required_dst, phase_name in (
+                (src, dst, "forward"),
+                (dst, src, "backward"),
+            ):
+                try:
+                    self.topology.link(required_src, required_dst)
+                except KeyError as exc:
+                    raise ValueError(
+                        f"Pipeline {phase_name} transfer requires a link from "
+                        f"{required_src!r} to {required_dst!r}"
+                    ) from exc
 
     def start_batch(self, num_microbatches: int) -> None:
         """Begin a training step with N micro-batches."""
