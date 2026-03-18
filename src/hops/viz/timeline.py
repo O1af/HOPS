@@ -55,6 +55,7 @@ def draw_timeline(collector: MetricsCollector, output_path: str) -> None:
 
     ax.set_yticks(range(len(devices)))
     ax.set_yticklabels(devices)
+    ax.invert_yaxis()
     ax.set_xlabel("Time (ms)")
     ax.set_title("Pipeline Timeline")
 
