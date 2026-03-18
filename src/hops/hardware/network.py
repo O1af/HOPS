@@ -14,6 +14,7 @@ class Link:
     bandwidth_gbps: float
     base_latency_us: float
     jitter: Distribution
+    active_transfers: int = 0
 
     def sample_transfer_time(self, size_mb: float, rng: np.random.Generator) -> float:
         """Return total transfer time in simulation time units (ms)."""

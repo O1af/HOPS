@@ -7,7 +7,7 @@ import numpy as np
 from hops.core.event_engine import EventEngine
 from hops.core.scheduler import PipelineState, Scheduler
 from hops.core.timing import TimingModel
-from hops.core.types import Event, EventKind, Phase
+from hops.core.types import AllreduceAlgo, Event, EventKind, Phase, Precision
 from hops.latency.distributions import Distribution
 from hops.metrics.collector import MetricsCollector
 
@@ -27,7 +27,11 @@ class Pipeline:
                  activation_size_mb: float = 50.0,
                  rng: np.random.Generator | None = None,
                  optimizer_latency: Distribution | None = None,
-                 gradient_size_mb: float = 0.0):
+                 gradient_size_mb: float = 0.0,
+                 stage_memory_mb: dict[int, float] | None = None,
+                 gradient_accumulation_steps: int = 1,
+                 precision: Precision = Precision.FP32,
+                 allreduce_algo: AllreduceAlgo = AllreduceAlgo.NAIVE):
         self.stages = {s.id: s for s in stages}
         self.stage_order = [s.id for s in stages]
         self._stage_index = {sid: i for i, sid in enumerate(self.stage_order)}
@@ -35,21 +39,52 @@ class Pipeline:
         self.topology = topology
         self.scheduler = scheduler
         self.collector = collector
-        self.activation_size_mb = activation_size_mb
         self.rng = rng if rng is not None else np.random.default_rng()
         self.timing_model = TimingModel(topology, compute_model, self.rng)
 
+        # Precision scaling
+        self.precision = precision
+        self.activation_size_mb = activation_size_mb * precision.data_scale
+        self.gradient_size_mb = gradient_size_mb * precision.data_scale
+
         # Optimizer config
         self.optimizer_latency = optimizer_latency
-        self.gradient_size_mb = gradient_size_mb
+        self.gradient_accumulation_steps = gradient_accumulation_steps
+        self.allreduce_algo = allreduce_algo
+
+        # ZeroBubble W-split detection via scheduler attribute
+        self._use_w_split = scheduler.uses_w_split
+
+        # Pre-compute unique ordered devices + device→stage lookup
+        seen: dict[str, int] = {}
+        for sid in self.stage_order:
+            did = self.stages[sid].device_id
+            if did not in seen:
+                seen[did] = sid
+        self._unique_devices = list(seen.keys())
+        self._device_to_first_stage = seen
+
+        # Memory tracking
+        self.stage_memory_mb = stage_memory_mb or {}
+        for stage_id, mem in self.stage_memory_mb.items():
+            device = self.topology.device(self.stages[stage_id].device_id)
+            device.allocate(mem * precision.weight_memory_overhead)
 
         self._state = PipelineState(num_stages=len(stages), num_microbatches=0)
         self._batch_done_count = 0
         self._expected_done_count = 0
-        self._total_mb_issued = 0  # running counter for globally unique MB IDs
+        self._total_mb_issued = 0
         self._optimizer_pending = 0
         self._allreduce_pending = 0
         self._in_optimizer_phase = False
+        self._accumulation_count = 0
+        self._is_optimizer_batch = False
+        self._w_tasks_remaining = 0
+
+        # Ring all-reduce state
+        self._ring_chunk_size = 0.0
+        self._ring_total_rounds = 0
+        self._ring_current_round = 0
 
         # Register event handlers
         engine.on(EventKind.COMPUTE_START, self._on_compute_start)
@@ -66,6 +101,7 @@ class Pipeline:
         self._state = PipelineState.initialize(
             num_stages=len(self.stages),
             num_microbatches=num_microbatches,
+            use_w_split=self._use_w_split,
         )
         self._batch_done_count = 0
         self._expected_done_count = num_microbatches
@@ -74,6 +110,17 @@ class Pipeline:
         self._optimizer_pending = 0
         self._allreduce_pending = 0
         self._in_optimizer_phase = False
+        self._w_tasks_remaining = (
+            num_microbatches * len(self.stages) if self._use_w_split else 0
+        )
+
+        # Gradient accumulation
+        self._accumulation_count += 1
+        self._is_optimizer_batch = (
+            self.optimizer_latency is not None
+            and self._accumulation_count >= self.gradient_accumulation_steps
+        )
+
         self._issue_ready_tasks()
 
     @property
@@ -82,9 +129,12 @@ class Pipeline:
             return False
         if self._batch_done_count < self._expected_done_count:
             return False
-        # If optimizer is enabled, wait for it to finish
-        if self.optimizer_latency is not None:
-            return self._in_optimizer_phase and self._optimizer_pending == 0 and self._allreduce_pending == 0
+        if self._use_w_split and self._w_tasks_remaining > 0:
+            return False
+        if self._is_optimizer_batch:
+            return (self._in_optimizer_phase
+                    and self._optimizer_pending == 0
+                    and self._allreduce_pending == 0)
         return True
 
     def set_failure_engine(self, failure_engine) -> None:
@@ -142,6 +192,14 @@ class Pipeline:
         start_time = event.payload["compute_start"]
         device_id = self.stages[stage_id].device_id
 
+        # Memory tracking: forward produces activations, backward consumes them
+        if phase == Phase.FORWARD:
+            device = self.topology.device(device_id)
+            device.allocate(self.activation_size_mb)
+            self.collector.record_peak_memory(device_id, device.peak_memory_mb)
+        elif phase in (Phase.BACKWARD, Phase.BACKWARD_B):
+            self.topology.device(device_id).free(self.activation_size_mb)
+
         # Record metrics with globally unique MB ID
         global_mb_id = mb_id + self._batch_mb_offset
         self.collector.record_compute(stage_id, global_mb_id, phase, device_id,
@@ -157,6 +215,12 @@ class Pipeline:
             now=engine.now,
         )
 
+    def _complete_microbatch(self, global_microbatch_id: int, now: float) -> None:
+        """Record microbatch completion and check if optimizer should start."""
+        self._batch_done_count += 1
+        self.collector.record_microbatch_completion(global_microbatch_id, now)
+        self._check_optimizer_trigger()
+
     def _advance_after_task_completion(self, *, stage_id: int, microbatch_id: int,
                                        phase: Phase, global_microbatch_id: int,
                                        now: float) -> None:
@@ -168,54 +232,101 @@ class Pipeline:
                 next_stage_id = self.stage_order[stage_idx + 1]
                 self._schedule_transfer(microbatch_id, phase, stage_id, next_stage_id)
             else:
-                self._state.mark_ready(stage_id, microbatch_id, Phase.BACKWARD)
-        else:  # BACKWARD
+                bwd_phase = Phase.BACKWARD_B if self._use_w_split else Phase.BACKWARD
+                self._state.mark_ready(stage_id, microbatch_id, bwd_phase)
+
+        elif phase in (Phase.BACKWARD, Phase.BACKWARD_B):
+            if phase == Phase.BACKWARD_B:
+                self._state.mark_ready(stage_id, microbatch_id, Phase.BACKWARD_W)
             if stage_idx > 0:
                 prev_stage_id = self.stage_order[stage_idx - 1]
                 self._schedule_transfer(microbatch_id, phase, stage_id, prev_stage_id)
             else:
-                self._batch_done_count += 1
-                self.collector.record_microbatch_completion(global_microbatch_id, now)
-                # Check if all microbatches done and optimizer should start
-                if (self._batch_done_count >= self._expected_done_count
-                        and self.optimizer_latency is not None
-                        and not self._in_optimizer_phase):
-                    self._start_optimizer_phase()
+                self._complete_microbatch(global_microbatch_id, now)
+
+        elif phase == Phase.BACKWARD_W:
+            self._w_tasks_remaining -= 1
+            self._check_optimizer_trigger()
 
         self._issue_ready_tasks()
+
+    def _check_optimizer_trigger(self) -> None:
+        """Start optimizer phase if all conditions are met."""
+        if self._batch_done_count < self._expected_done_count:
+            return
+        if self._use_w_split and self._w_tasks_remaining > 0:
+            return
+        if not self._is_optimizer_batch:
+            return
+        if self._in_optimizer_phase:
+            return
+        self._accumulation_count = 0
+        self._start_optimizer_phase()
+
+    def _validate_links(self, pairs: list[tuple[str, str]], context: str) -> None:
+        """Ensure all required links exist in topology, or raise ValueError."""
+        for src, dst in pairs:
+            try:
+                self.topology.link(src, dst)
+            except KeyError:
+                raise ValueError(
+                    f"{context} requires a link from {src!r} to {dst!r}, "
+                    f"but none exists in the topology"
+                )
 
     def _start_optimizer_phase(self) -> None:
         """Kick off all-reduce followed by optimizer compute on each device."""
         self._in_optimizer_phase = True
-        device_ids = [self.stages[sid].device_id for sid in self.stage_order]
-        unique_devices = list(dict.fromkeys(device_ids))  # preserve order, deduplicate
 
-        if self.gradient_size_mb > 0 and len(unique_devices) > 1:
-            # All-reduce using adjacent pairs along the pipeline topology
-            pairs = []
-            for i in range(len(unique_devices) - 1):
-                pairs.append((unique_devices[i], unique_devices[i + 1]))
-                pairs.append((unique_devices[i + 1], unique_devices[i]))
-            # Validate all required links exist before scheduling
-            for src, dst in pairs:
-                try:
-                    self.topology.link(src, dst)
-                except KeyError:
-                    raise ValueError(
-                        f"Optimizer all-reduce requires a link from {src!r} to {dst!r}, "
-                        f"but none exists in the topology"
-                    )
-            self._allreduce_pending = len(pairs)
-            for src, dst in pairs:
-                self.engine.schedule(Event(
-                    time=self.engine.now,
-                    kind=EventKind.ALLREDUCE_START,
-                    payload={"src_device": src, "dst_device": dst,
-                             "size_mb": self.gradient_size_mb},
-                ))
+        if self.gradient_size_mb > 0 and len(self._unique_devices) > 1:
+            if self.allreduce_algo == AllreduceAlgo.RING:
+                self._start_ring_allreduce()
+            else:
+                self._start_naive_allreduce()
         else:
-            # No all-reduce needed (single device or zero gradient size)
             self._start_optimizer_compute()
+
+    def _start_naive_allreduce(self) -> None:
+        """Adjacent pairwise all-reduce (original algorithm)."""
+        pairs = []
+        for i in range(len(self._unique_devices) - 1):
+            pairs.append((self._unique_devices[i], self._unique_devices[i + 1]))
+            pairs.append((self._unique_devices[i + 1], self._unique_devices[i]))
+        self._validate_links(pairs, "Naive all-reduce")
+        self._allreduce_pending = len(pairs)
+        for src, dst in pairs:
+            self.engine.schedule(Event(
+                time=self.engine.now,
+                kind=EventKind.ALLREDUCE_START,
+                payload={"src_device": src, "dst_device": dst,
+                         "size_mb": self.gradient_size_mb},
+            ))
+
+    def _start_ring_allreduce(self) -> None:
+        """Ring all-reduce: 2*(N-1) rounds, N parallel transfers per round."""
+        N = len(self._unique_devices)
+        ring_pairs = [(self._unique_devices[i], self._unique_devices[(i + 1) % N])
+                      for i in range(N)]
+        self._validate_links(ring_pairs, "Ring all-reduce")
+
+        self._ring_chunk_size = self.gradient_size_mb / N
+        self._ring_total_rounds = 2 * (N - 1)
+        self._ring_current_round = 0
+        self._start_ring_round()
+
+    def _start_ring_round(self) -> None:
+        """Launch one round of ring all-reduce (N parallel transfers)."""
+        N = len(self._unique_devices)
+        self._allreduce_pending = N
+        for i in range(N):
+            src = self._unique_devices[i]
+            dst = self._unique_devices[(i + 1) % N]
+            self.engine.schedule(Event(
+                time=self.engine.now,
+                kind=EventKind.ALLREDUCE_START,
+                payload={"src_device": src, "dst_device": dst,
+                         "size_mb": self._ring_chunk_size},
+            ))
 
     def _on_allreduce_start(self, event: Event, engine: EventEngine) -> None:
         src = event.payload["src_device"]
@@ -237,21 +348,27 @@ class Pipeline:
 
     def _on_allreduce_end(self, event: Event, engine: EventEngine) -> None:
         transfer_start = event.payload["transfer_start"]
+        src = event.payload["src_device"]
+        dst = event.payload["dst_device"]
+
+        self.timing_model.release_transfer(src, dst)
+
         self.collector.record_transfer(
-            None, Phase.OPTIMIZER,
-            event.payload["src_device"], event.payload["dst_device"],
-            transfer_start, engine.now)
+            None, Phase.OPTIMIZER, src, dst, transfer_start, engine.now)
 
         self._allreduce_pending -= 1
         if self._allreduce_pending == 0:
+            if self.allreduce_algo == AllreduceAlgo.RING:
+                self._ring_current_round += 1
+                if self._ring_current_round < self._ring_total_rounds:
+                    self._start_ring_round()
+                    return
             self._start_optimizer_compute()
 
     def _start_optimizer_compute(self) -> None:
         """Schedule optimizer weight update on each device."""
-        device_ids = [self.stages[sid].device_id for sid in self.stage_order]
-        unique_devices = list(dict.fromkeys(device_ids))
-        self._optimizer_pending = len(unique_devices)
-        for device_id in unique_devices:
+        self._optimizer_pending = len(self._unique_devices)
+        for device_id in self._unique_devices:
             self.engine.schedule(Event(
                 time=self.engine.now,
                 kind=EventKind.OPTIMIZER_START,
@@ -260,7 +377,6 @@ class Pipeline:
 
     def _on_optimizer_start(self, event: Event, engine: EventEngine) -> None:
         device_id = event.payload["device_id"]
-        # Sample duration once and carry it in the payload across retries
         duration = event.payload.get("duration")
         if duration is None:
             duration = self.optimizer_latency.sample(self.rng)
@@ -284,9 +400,7 @@ class Pipeline:
     def _on_optimizer_end(self, event: Event, engine: EventEngine) -> None:
         device_id = event.payload["device_id"]
         start_time = event.payload["compute_start"]
-        # Find a stage_id for this device (for metrics)
-        stage_id = next(sid for sid in self.stage_order
-                        if self.stages[sid].device_id == device_id)
+        stage_id = self._device_to_first_stage[device_id]
         self.collector.record_compute(stage_id, None, Phase.OPTIMIZER, device_id,
                                       start_time, engine.now)
         self._optimizer_pending -= 1
@@ -332,20 +446,15 @@ class Pipeline:
         phase = event.payload["phase"]
         to_stage = event.payload["to_stage"]
         transfer_start = event.payload["transfer_start"]
+        src = event.payload["src_device"]
+        dst = event.payload["dst_device"]
+
+        self.timing_model.release_transfer(src, dst)
 
         global_mb_id = mb_id + self._batch_mb_offset
         self.collector.record_transfer(
-            global_mb_id, phase, event.payload["src_device"],
-            event.payload["dst_device"], transfer_start, engine.now)
+            global_mb_id, phase, src, dst, transfer_start, engine.now)
 
-        self._advance_after_transfer_completion(
-            stage_id=to_stage,
-            microbatch_id=mb_id,
-            phase=phase,
-        )
-
-    def _advance_after_transfer_completion(self, *, stage_id: int, microbatch_id: int,
-                                           phase: Phase) -> None:
-        """Release newly available work after a transfer completes."""
-        self._state.mark_ready(stage_id, microbatch_id, phase)
+        # All transfer types mark the same phase ready at the destination
+        self._state.mark_ready(to_stage, mb_id, phase)
         self._issue_ready_tasks()

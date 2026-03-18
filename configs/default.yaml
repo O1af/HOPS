@@ -30,7 +30,7 @@ pipeline:
       compute_latency: { type: heavy_tailed, base: 6.0, alpha: 2.5 }
 
 scheduler:
-  policy: 1f1b
+  policy: zero_bubble
 
 hardware:
   devices:

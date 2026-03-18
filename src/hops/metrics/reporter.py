@@ -51,6 +51,11 @@ class Reporter:
             print(f"  All-reduce time: {optimizer_transfer:.2f} ms")
             print(f"  Weight update time: {optimizer_compute:.2f} ms")
 
+        if c.peak_memory_per_device:
+            print(f"\nPeak memory per device:")
+            for device_id, peak in sorted(c.peak_memory_per_device.items()):
+                print(f"  {device_id}: {peak:.1f} MB")
+
         if c.failures:
             print(f"\nFailures: {len(c.failures)}")
             total_downtime = sum(f.recovery_time for f in c.failures)

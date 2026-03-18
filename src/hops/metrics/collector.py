@@ -51,6 +51,7 @@ class MetricsCollector:
         self.in_flight: list[InFlightRecord] = []
         self._mb_start_times: dict[int, float] = {}
         self._mb_completion_times: dict[int, float] = {}
+        self.peak_memory_per_device: dict[str, float] = {}
 
     def record_compute(self, stage_id: int, microbatch_id: int | None, phase: Phase,
                        device_id: str, start_time: float, end_time: float) -> None:
@@ -77,6 +78,10 @@ class MetricsCollector:
 
     def record_microbatch_completion(self, microbatch_id: int, time: float) -> None:
         self._mb_completion_times[microbatch_id] = time
+
+    def record_peak_memory(self, device_id: str, peak_mb: float) -> None:
+        self.peak_memory_per_device[device_id] = max(
+            self.peak_memory_per_device.get(device_id, 0.0), peak_mb)
 
     @property
     def completed_microbatches(self) -> int:
@@ -179,3 +184,4 @@ class MetricsCollector:
         self.in_flight.clear()
         self._mb_start_times.clear()
         self._mb_completion_times.clear()
+        self.peak_memory_per_device.clear()
