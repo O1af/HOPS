@@ -6,6 +6,7 @@ import yaml
 from hops.core.event_engine import EventEngine
 from hops.core.pipeline import Pipeline, Stage
 from hops.core.scheduler import make_scheduler, max_in_flight_count
+from hops.core.types import AllreduceAlgo, Precision
 from hops.failure.engine import FailureEngine
 from hops.hardware.topology import Topology
 from hops.latency.compute_model import ComputeModel
@@ -18,16 +19,15 @@ from hops.viz.timeline import draw_timeline
 
 def validate_memory(topology, stage_configs, policy: str,
                     num_microbatches: int, activation_size_mb: float,
-                    precision: str) -> None:
+                    precision: Precision) -> None:
     """Check that peak memory fits on each device. Raises ValueError if not."""
-    scale = 0.5 if precision in ("fp16", "bf16") else 1.0
-    eff_activation = activation_size_mb * scale
+    eff_activation = activation_size_mb * precision.data_scale
     num_stages = len(stage_configs)
 
     for i, stage_cfg in enumerate(stage_configs):
         device = topology.device(stage_cfg["device"])
         weight_mem = stage_cfg.get("memory_mb", 0.0)
-        weight_overhead = 1.5 if precision in ("fp16", "bf16") else 1.0
+        weight_overhead = precision.weight_memory_overhead
         max_activations = max_in_flight_count(policy, i, num_stages, num_microbatches)
         peak = weight_mem * weight_overhead + eff_activation * max_activations
         if peak > device.memory_mb:
@@ -61,8 +61,8 @@ def main():
     # Build components
     topology = Topology.from_yaml(config["hardware"])
 
-    precision = config.get("pipeline", {}).get("precision", "fp32")
-    precision_speedup = {"fp32": 1.0, "fp16": 2.0, "bf16": 2.0}.get(precision, 1.0)
+    precision = Precision(config.get("pipeline", {}).get("precision", "fp32"))
+    precision_speedup = precision.compute_speedup
 
     compute_model = ComputeModel.from_yaml({
         **config["pipeline"],
@@ -90,7 +90,7 @@ def main():
     optimizer_latency = None
     gradient_size_mb = 0.0
     gradient_accumulation_steps = opt_cfg.get("gradient_accumulation_steps", 1)
-    allreduce_algo = opt_cfg.get("allreduce_algo", "naive")
+    allreduce_algo = AllreduceAlgo(opt_cfg.get("allreduce_algo", "naive"))
     if opt_cfg.get("enabled", False):
         optimizer_latency = Distribution.from_yaml(opt_cfg["compute_latency"])
         gradient_size_mb = opt_cfg.get("gradient_size_mb", 0.0)

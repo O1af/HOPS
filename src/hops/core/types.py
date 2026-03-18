@@ -34,6 +34,36 @@ class TaskStatus(Enum):
     COMPLETED = auto()
 
 
+class Precision(Enum):
+    FP32 = "fp32"
+    FP16 = "fp16"
+    BF16 = "bf16"
+
+    @property
+    def _is_half(self) -> bool:
+        return self in (Precision.FP16, Precision.BF16)
+
+    @property
+    def data_scale(self) -> float:
+        """Activation/gradient size multiplier (half-precision halves data)."""
+        return 0.5 if self._is_half else 1.0
+
+    @property
+    def compute_speedup(self) -> float:
+        """Compute speedup from tensor cores."""
+        return 2.0 if self._is_half else 1.0
+
+    @property
+    def weight_memory_overhead(self) -> float:
+        """FP32 master copy overhead (1.5x for mixed precision)."""
+        return 1.5 if self._is_half else 1.0
+
+
+class AllreduceAlgo(Enum):
+    NAIVE = "naive"
+    RING = "ring"
+
+
 @dataclass(order=True)
 class Event:
     time: float

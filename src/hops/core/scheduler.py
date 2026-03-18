@@ -1,6 +1,7 @@
 """Scheduling policies for pipeline execution."""
 
 from abc import ABC, abstractmethod
+from collections import defaultdict
 from dataclasses import dataclass, field
 
 from hops.core.types import Phase, StageTask, TaskStatus
@@ -11,6 +12,11 @@ class PipelineState:
     num_stages: int
     num_microbatches: int
     task_states: dict[tuple[int, int, Phase], TaskStatus] = field(default_factory=dict)
+    # O(1) counters maintained during state transitions
+    _running_per_stage: dict[int, int] = field(default_factory=lambda: defaultdict(int))
+    _in_flight_per_stage: dict[int, int] = field(default_factory=lambda: defaultdict(int))
+    _completed: dict[tuple[int, Phase], int] = field(default_factory=lambda: defaultdict(int))
+    _total_fwd_completed: int = 0
 
     @classmethod
     def initialize(cls, num_stages: int, num_microbatches: int,
@@ -37,57 +43,55 @@ class PipelineState:
 
     def mark_ready(self, stage_id: int, microbatch_id: int, phase: Phase) -> None:
         key = (stage_id, microbatch_id, phase)
-        if key in self.task_states and self.task_states[key] != TaskStatus.COMPLETED:
+        if key not in self.task_states:
+            return
+        status = self.task_states[key]
+        if status == TaskStatus.WAITING:
             self.task_states[key] = TaskStatus.READY
+        elif status in (TaskStatus.SCHEDULED, TaskStatus.RUNNING, TaskStatus.COMPLETED):
+            return
 
     def reserve_task(self, stage_id: int, microbatch_id: int, phase: Phase) -> None:
         key = (stage_id, microbatch_id, phase)
         if self.task_states[key] != TaskStatus.READY:
             raise ValueError(f"Cannot reserve task {key} from state {self.task_states[key]}")
         self.task_states[key] = TaskStatus.SCHEDULED
+        self._in_flight_per_stage[stage_id] += 1
 
     def begin_compute(self, stage_id: int, microbatch_id: int, phase: Phase) -> None:
         key = (stage_id, microbatch_id, phase)
         if self.task_states[key] != TaskStatus.SCHEDULED:
             raise ValueError(f"Cannot start compute for task {key} from state {self.task_states[key]}")
         self.task_states[key] = TaskStatus.RUNNING
+        self._running_per_stage[stage_id] += 1
 
     def finish_task(self, stage_id: int, microbatch_id: int, phase: Phase) -> None:
         key = (stage_id, microbatch_id, phase)
         if self.task_states[key] != TaskStatus.RUNNING:
             raise ValueError(f"Cannot finish task {key} from state {self.task_states[key]}")
         self.task_states[key] = TaskStatus.COMPLETED
+        self._running_per_stage[stage_id] -= 1
+        self._in_flight_per_stage[stage_id] -= 1
+        self._completed[(stage_id, phase)] += 1
+        if phase == Phase.FORWARD:
+            self._total_fwd_completed += 1
 
     def stage_is_busy(self, stage_id: int) -> bool:
-        return any(
-            status == TaskStatus.RUNNING and task_stage == stage_id
-            for (task_stage, _, _), status in self.task_states.items()
-        )
+        return self._running_per_stage[stage_id] > 0
 
     def stage_in_flight_count(self, stage_id: int) -> int:
-        return sum(
-            1
-            for (task_stage, _, _), status in self.task_states.items()
-            if task_stage == stage_id and status in {TaskStatus.SCHEDULED, TaskStatus.RUNNING}
-        )
+        return self._in_flight_per_stage[stage_id]
 
     def completed_count(self, stage_id: int, phase: Phase) -> int:
-        return sum(
-            1
-            for (task_stage, _, task_phase), status in self.task_states.items()
-            if task_stage == stage_id and task_phase == phase and status == TaskStatus.COMPLETED
-        )
+        return self._completed[(stage_id, phase)]
 
     def all_forwards_completed(self) -> bool:
-        total_fwd = sum(
-            1
-            for (_, _, phase), status in self.task_states.items()
-            if phase == Phase.FORWARD and status == TaskStatus.COMPLETED
-        )
-        return total_fwd == self.num_stages * self.num_microbatches
+        return self._total_fwd_completed == self.num_stages * self.num_microbatches
 
 
 class Scheduler(ABC):
+    uses_w_split: bool = False
+
     @abstractmethod
     def next_tasks(self, state: PipelineState) -> list[StageTask]:
         """Return tasks that should start now."""
@@ -101,16 +105,16 @@ class GPipeScheduler(Scheduler):
         s = state
 
         if not s.all_forwards_completed():
-            for mb in range(s.num_microbatches):
-                for stage in range(s.num_stages):
-                    if s.is_task_ready(stage, mb, Phase.FORWARD):
-                        tasks.append(StageTask(mb, stage, Phase.FORWARD))
+            for stage in range(s.num_stages):
+                mb = s.completed_count(stage, Phase.FORWARD)
+                if mb < s.num_microbatches and s.is_task_ready(stage, mb, Phase.FORWARD):
+                    tasks.append(StageTask(mb, stage, Phase.FORWARD))
             return tasks
 
-        for mb in range(s.num_microbatches):
-            for stage in reversed(range(s.num_stages)):
-                if s.is_task_ready(stage, mb, Phase.BACKWARD):
-                    tasks.append(StageTask(mb, stage, Phase.BACKWARD))
+        for stage in reversed(range(s.num_stages)):
+            mb = s.completed_count(stage, Phase.BACKWARD)
+            if mb < s.num_microbatches and s.is_task_ready(stage, mb, Phase.BACKWARD):
+                tasks.append(StageTask(mb, stage, Phase.BACKWARD))
         return tasks
 
 
@@ -162,6 +166,7 @@ class ZeroBubbleScheduler(Scheduler):
       - Steady:   alternate F, B — W only runs when both F and B are blocked
       - Cooldown: finish remaining B tasks, then drain all deferred W tasks
     """
+    uses_w_split: bool = True
 
     def next_tasks(self, state: PipelineState) -> list[StageTask]:
         tasks = []

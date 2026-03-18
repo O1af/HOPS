@@ -9,7 +9,7 @@ from hops.core.scheduler import (
     GPipeScheduler, OneFOneBScheduler, ZeroBubbleScheduler,
     PipelineState, make_scheduler, max_in_flight_count,
 )
-from hops.core.types import Phase
+from hops.core.types import AllreduceAlgo, Phase, Precision
 from hops.hardware.device import Device
 from hops.hardware.network import Link
 from hops.hardware.topology import Topology
@@ -21,8 +21,8 @@ from hops.metrics.collector import MetricsCollector
 def _make_pipeline(scheduler, *, num_stages=4, compute_time=5.0, seed=42,
                    activation_size_mb=0.0, optimizer_latency=None,
                    gradient_size_mb=0.0, stage_memory_mb=None,
-                   gradient_accumulation_steps=1, precision="fp32",
-                   allreduce_algo="naive", device_memory_mb=8192,
+                   gradient_accumulation_steps=1, precision=Precision.FP32,
+                   allreduce_algo=AllreduceAlgo.NAIVE, device_memory_mb=8192,
                    include_ring_link=False):
     """Helper to build pipelines with new features."""
     rng = np.random.default_rng(seed)
@@ -157,7 +157,7 @@ class TestMemory:
         topology = Topology(devices, [])
         stage_configs = [{"id": 0, "device": "gpu0", "memory_mb": 2048}]
         # Should not raise
-        validate_memory(topology, stage_configs, "gpipe", 8, 50.0, "fp32")
+        validate_memory(topology, stage_configs, "gpipe", 8, 50.0, Precision.FP32)
 
     def test_memory_validation_fails_for_infeasible_config(self):
         from main import validate_memory
@@ -165,7 +165,7 @@ class TestMemory:
         topology = Topology(devices, [])
         stage_configs = [{"id": 0, "device": "gpu0", "memory_mb": 2048}]
         with pytest.raises(ValueError, match="exceeds device capacity"):
-            validate_memory(topology, stage_configs, "gpipe", 8, 50.0, "fp32")
+            validate_memory(topology, stage_configs, "gpipe", 8, 50.0, Precision.FP32)
 
     def test_max_in_flight_count(self):
         assert max_in_flight_count("gpipe", 0, 4, 8) == 8
@@ -334,7 +334,7 @@ class TestRingAllReduce:
         engine, pipeline, collector = _make_pipeline(
             GPipeScheduler(), num_stages=N, compute_time=5.0,
             optimizer_latency=Constant(1.0), gradient_size_mb=100.0,
-            allreduce_algo="ring", include_ring_link=True)
+            allreduce_algo=AllreduceAlgo.RING, include_ring_link=True)
 
         pipeline.start_batch(1)
         engine.run(stop_condition=lambda: pipeline.batch_complete)
@@ -350,7 +350,7 @@ class TestRingAllReduce:
         engine, pipeline, collector = _make_pipeline(
             GPipeScheduler(), num_stages=N, compute_time=5.0,
             optimizer_latency=Constant(1.0), gradient_size_mb=gradient_size,
-            allreduce_algo="ring", include_ring_link=True)
+            allreduce_algo=AllreduceAlgo.RING, include_ring_link=True)
 
         pipeline.start_batch(1)
         engine.run(stop_condition=lambda: pipeline.batch_complete)
@@ -363,7 +363,7 @@ class TestRingAllReduce:
         engine, pipeline, collector = _make_pipeline(
             GPipeScheduler(), num_stages=4, compute_time=5.0,
             optimizer_latency=Constant(1.0), gradient_size_mb=100.0,
-            allreduce_algo="ring", include_ring_link=False)
+            allreduce_algo=AllreduceAlgo.RING, include_ring_link=False)
 
         pipeline.start_batch(1)
         with pytest.raises(ValueError, match="Ring all-reduce requires"):
@@ -374,7 +374,7 @@ class TestRingAllReduce:
         engine, pipeline, collector = _make_pipeline(
             GPipeScheduler(), num_stages=2, compute_time=5.0,
             optimizer_latency=Constant(1.0), gradient_size_mb=50.0,
-            allreduce_algo="naive")
+            allreduce_algo=AllreduceAlgo.NAIVE)
 
         pipeline.start_batch(1)
         engine.run(stop_condition=lambda: pipeline.batch_complete)
@@ -389,19 +389,19 @@ class TestMixedPrecision:
     def test_fp16_halves_activation_size(self):
         engine, pipeline, collector = _make_pipeline(
             GPipeScheduler(), num_stages=2, activation_size_mb=100.0,
-            precision="fp16")
+            precision=Precision.FP16)
         assert pipeline.activation_size_mb == 50.0
 
     def test_bf16_halves_gradient_size(self):
         engine, pipeline, collector = _make_pipeline(
             GPipeScheduler(), num_stages=2, gradient_size_mb=200.0,
-            precision="bf16")
+            precision=Precision.BF16)
         assert pipeline.gradient_size_mb == 100.0
 
     def test_fp32_no_scaling(self):
         engine, pipeline, collector = _make_pipeline(
             GPipeScheduler(), num_stages=2, activation_size_mb=100.0,
-            gradient_size_mb=200.0, precision="fp32")
+            gradient_size_mb=200.0, precision=Precision.FP32)
         assert pipeline.activation_size_mb == 100.0
         assert pipeline.gradient_size_mb == 200.0
 
@@ -409,7 +409,7 @@ class TestMixedPrecision:
         """FP16 adds 1.5x weight memory overhead (master copy)."""
         engine, pipeline, collector = _make_pipeline(
             GPipeScheduler(), num_stages=2,
-            stage_memory_mb={0: 1000, 1: 1000}, precision="fp16")
+            stage_memory_mb={0: 1000, 1: 1000}, precision=Precision.FP16)
 
         device0 = pipeline.topology.device("gpu0")
         assert device0.memory_used_mb == 1500  # 1000 * 1.5
@@ -434,7 +434,7 @@ class TestZeroBubbleMixedPrecision:
     def test_zero_bubble_fp16_completes(self):
         engine, pipeline, collector = _make_pipeline(
             ZeroBubbleScheduler(), num_stages=4, compute_time=5.0,
-            activation_size_mb=100.0, precision="fp16")
+            activation_size_mb=100.0, precision=Precision.FP16)
         pipeline.start_batch(8)
         engine.run()
 
