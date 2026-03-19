@@ -60,11 +60,12 @@ def main() -> None:
         runtime.pipeline.start_batch(runtime.num_microbatches)
         runtime.engine.run(stop_condition=lambda: runtime.pipeline.batch_complete)
 
-    runtime.reporter.print_summary()
+    summary = runtime.reporter.summary_model()
+    runtime.reporter.print_summary(summary)
 
     summary_json_path = args.summary_json or runtime.output_config.summary_json
     if summary_json_path:
-        runtime.reporter.write_summary_json(summary_json_path)
+        runtime.reporter.write_summary_json(summary_json_path, summary)
 
     trace_csv_path = args.trace_csv or runtime.output_config.trace_csv
     if trace_csv_path:
@@ -75,11 +76,8 @@ def main() -> None:
         if runtime.output_config.timeline:
             draw_timeline(runtime.collector, runtime.output_config.timeline)
         if runtime.output_config.dashboard:
-            draw_dashboard(
-                runtime.reporter.summary_model(),
-                runtime.reporter.analyzer.e2e_latencies(),
-                runtime.output_config.dashboard,
-            )
+            latencies = runtime.collector.e2e_latencies()
+            draw_dashboard(summary, latencies, runtime.output_config.dashboard)
 
 
 if __name__ == "__main__":

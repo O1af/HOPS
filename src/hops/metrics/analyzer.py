@@ -40,13 +40,18 @@ class MetricsAnalyzer:
         return intervals
 
     def trace_bounds(self) -> tuple[float, float]:
-        starts = [record.start_time for record in self.collector.computes]
-        starts.extend(record.start_time for record in self.collector.transfers)
-        ends = [record.end_time for record in self.collector.computes]
-        ends.extend(record.end_time for record in self.collector.transfers)
-        if not starts or not ends:
-            return 0.0, 0.0
-        return min(starts), max(ends)
+        lo, hi = float("inf"), float("-inf")
+        for r in self.collector.computes:
+            if r.start_time < lo:
+                lo = r.start_time
+            if r.end_time > hi:
+                hi = r.end_time
+        for r in self.collector.transfers:
+            if r.start_time < lo:
+                lo = r.start_time
+            if r.end_time > hi:
+                hi = r.end_time
+        return (lo, hi) if lo != float("inf") else (0.0, 0.0)
 
     def trace_duration(self) -> float:
         start, end = self.trace_bounds()
@@ -101,11 +106,12 @@ class MetricsAnalyzer:
             for record in self.collector.transfers
         ])
 
-    def stage_idle_intervals(self) -> dict[int, list[tuple[float, float]]]:
-        occupancy = self.stage_occupancy_intervals()
+    @staticmethod
+    def _idle_from_occupancy(
+        occupancy: dict[int, list[tuple[float, float]]],
+    ) -> dict[int, list[tuple[float, float]]]:
         if not occupancy:
             return {}
-
         trace_start = min(start for intervals in occupancy.values() for start, _ in intervals)
         trace_end = max(end for intervals in occupancy.values() for _, end in intervals)
         idle: dict[int, list[tuple[float, float]]] = {}
@@ -120,6 +126,9 @@ class MetricsAnalyzer:
                 stage_idle.append((cursor, trace_end))
             idle[stage_id] = stage_idle
         return idle
+
+    def stage_idle_intervals(self) -> dict[int, list[tuple[float, float]]]:
+        return self._idle_from_occupancy(self.stage_occupancy_intervals())
 
     def bubble_ratio(self) -> float:
         idle = self.stage_idle_intervals()
@@ -265,26 +274,53 @@ class MetricsAnalyzer:
         )
 
     def summary(self) -> SimulationSummary:
+        # Pre-compute shared intermediates to avoid redundant traversals.
+        duration = self.trace_duration()
+        ms = self.makespan()
+        stage_occ = self.stage_occupancy_intervals()
+        device_occ = self.device_occupancy_intervals()
+        link_occ = self.link_occupancy_intervals()
+
+        # Bubble ratio from stage occupancy.
+        idle = self._idle_from_occupancy(stage_occ)
+        total_idle = sum(end - start for intervals in idle.values() for start, end in intervals)
+        bubble = total_idle / (ms * len(idle)) if ms > 0 and idle else 0.0
+
+        # Utilization from pre-computed occupancy.
+        per_stage = (
+            {sid: sum(e - s for s, e in ivs) / ms for sid, ivs in sorted(stage_occ.items())}
+            if stage_occ and ms > 0 else {}
+        )
+        per_device = (
+            {did: sum(e - s for s, e in ivs) / duration for did, ivs in sorted(device_occ.items())}
+            if device_occ and duration > 0 else {}
+        )
+        per_link = (
+            {lid: sum(e - s for s, e in ivs) / duration for lid, ivs in sorted(link_occ.items())}
+            if link_occ and duration > 0 else {}
+        )
+
         throughput = self.throughput()
         total_compute = self.total_compute_time()
         total_transfer = self.total_transfer_time()
         contention = self.transfer_contention_stats()
+
         return SimulationSummary(
             completed_microbatches=self.collector.completed_microbatches,
             throughput=ThroughputSummary(per_ms=throughput, per_s=throughput * 1000.0),
             latency_ms=self.latency_summary(),
-            bubble_ratio=self.bubble_ratio(),
+            bubble_ratio=bubble,
             time_ms=TimeSummary(
-                trace_duration_ms=self.trace_duration(),
-                makespan_ms=self.makespan(),
+                trace_duration_ms=duration,
+                makespan_ms=ms,
                 compute_ms=total_compute,
                 transfer_ms=total_transfer,
                 communication_overhead_ratio=(total_transfer / total_compute if total_compute > 0 else 0.0),
             ),
             utilization=UtilizationSummary(
-                per_stage=self.per_stage_utilization(),
-                per_device=self.per_device_utilization(),
-                per_link=self.per_link_transfer_utilization(),
+                per_stage=per_stage,
+                per_device=per_device,
+                per_link=per_link,
             ),
             optimizer=self.optimizer_summary(),
             failures=self.failure_summary(),

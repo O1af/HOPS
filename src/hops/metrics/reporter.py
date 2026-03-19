@@ -12,10 +12,11 @@ class Reporter:
     """Prints a summary of simulation metrics."""
 
     def __init__(self, metrics: MetricsCollector | MetricsAnalyzer):
-        if isinstance(metrics, MetricsAnalyzer):
-            self.analyzer = metrics
-        else:
-            self.analyzer = MetricsAnalyzer(metrics)
+        self._analyzer = metrics if isinstance(metrics, MetricsAnalyzer) else metrics.analyzer
+
+    @property
+    def analyzer(self) -> MetricsAnalyzer:
+        return self._analyzer
 
     def summary(self) -> dict[str, object]:
         return self.summary_model().to_dict()
@@ -23,14 +24,16 @@ class Reporter:
     def summary_model(self) -> SimulationSummary:
         return self.analyzer.summary()
 
-    def write_summary_json(self, output_path: str) -> None:
+    def write_summary_json(self, output_path: str,
+                           summary: SimulationSummary | None = None) -> None:
         path = Path(output_path)
         path.parent.mkdir(parents=True, exist_ok=True)
+        data = (summary or self.summary_model()).to_dict()
         with path.open("w", encoding="utf-8") as f:
-            json.dump(self.summary(), f, indent=2, sort_keys=True)
+            json.dump(data, f, indent=2, sort_keys=True)
 
-    def print_summary(self) -> None:
-        summary = self.summary_model()
+    def print_summary(self, summary: SimulationSummary | None = None) -> None:
+        summary = summary or self.summary_model()
         print("\n" + "=" * 60)
         print("HOPS Simulation Report")
         print("=" * 60)

@@ -24,14 +24,6 @@ class LinkProfile:
     base_latency_us: float
     jitter: Distribution
 
-    @classmethod
-    def from_yaml(cls, config: dict) -> "LinkProfile":
-        return cls(
-            bandwidth_gbps=config["bandwidth_gbps"],
-            base_latency_us=config["base_latency_us"],
-            jitter=Distribution.from_yaml(config["jitter"]),
-        )
-
 
 @dataclass(frozen=True)
 class LocalityPenalty:
@@ -39,15 +31,6 @@ class LocalityPenalty:
     memory_bandwidth_scale: float = 1.0
     memory_latency_us: float = 0.0
     transfer_scale: float = 1.0
-
-    @classmethod
-    def from_yaml(cls, config: dict) -> "LocalityPenalty":
-        return cls(
-            compute_scale=config.get("compute_scale", 1.0),
-            memory_bandwidth_scale=config.get("memory_bandwidth_scale", 1.0),
-            memory_latency_us=config.get("memory_latency_us", 0.0),
-            transfer_scale=config.get("transfer_scale", 1.0),
-        )
 
 
 class Topology:
@@ -143,28 +126,3 @@ class Topology:
     @property
     def links(self) -> dict[tuple[str, str], Link]:
         return self._links
-
-    @classmethod
-    def from_yaml(cls, config: dict) -> "Topology":
-        """Legacy compatibility constructor for pre-canonical hardware configs."""
-        devices = [Device.from_yaml(d) for d in config["devices"]]
-        links = [Link.from_yaml(lnk) for lnk in config.get("links", [])]
-        fabric = config.get("fabric", {})
-        locality_penalty_cfg = config.get("locality_penalties", config.get("numa_penalties", {}))
-        profiles: dict[Locality, LinkProfile] = {}
-        penalties: dict[Locality, LocalityPenalty] = {}
-        aliases = {
-            Locality.SAME_SOCKET: ("same_socket", "intra_socket"),
-            Locality.SAME_NODE: ("same_node", "intra_node"),
-            Locality.CROSS_NODE: ("cross_node", "inter_node"),
-        }
-        for locality, keys in aliases.items():
-            for key in keys:
-                if key in fabric:
-                    profiles[locality] = LinkProfile.from_yaml(fabric[key])
-                    break
-            for key in keys:
-                if key in locality_penalty_cfg:
-                    penalties[locality] = LocalityPenalty.from_yaml(locality_penalty_cfg[key])
-                    break
-        return cls(devices, links, link_profiles=profiles, locality_penalties=penalties)

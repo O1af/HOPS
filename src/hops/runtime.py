@@ -11,7 +11,7 @@ from hops.core.event_engine import EventEngine
 from hops.core.pipeline import Pipeline, Stage
 from hops.core.scheduler import make_scheduler, max_in_flight_count
 from hops.failure.engine import FailureEngine
-from hops.hardware.device import Device
+from hops.hardware.device import Device, numa_from_socket
 from hops.hardware.network import Link
 from hops.hardware.topology import LinkProfile, Locality, LocalityPenalty, Topology
 from hops.latency.compute_model import ComputeModel
@@ -51,8 +51,7 @@ def _resolve_device(spec: DeviceSpec, overrides: dict[str, object], registry: Pr
         if override and override.memory_bandwidth_gbps is not None
         else preset.memory_bandwidth_gbps
     )
-    socket_digits = "".join(ch for ch in spec.socket if ch.isdigit())
-    numa_node = int(socket_digits) if socket_digits else 0
+    numa_node = numa_from_socket(spec.socket)
     return Device(
         id=spec.id,
         kind=preset.kind,
@@ -89,24 +88,9 @@ def _resolve_link_profiles(config: AppConfig, registry: PresetRegistry
         ),
     }
     penalties = {
-        Locality.SAME_SOCKET: LocalityPenalty(
-            compute_scale=same_socket.penalty.compute_scale,
-            memory_bandwidth_scale=same_socket.penalty.memory_bandwidth_scale,
-            memory_latency_us=same_socket.penalty.memory_latency_us,
-            transfer_scale=same_socket.penalty.transfer_scale,
-        ),
-        Locality.SAME_NODE: LocalityPenalty(
-            compute_scale=same_node.penalty.compute_scale,
-            memory_bandwidth_scale=same_node.penalty.memory_bandwidth_scale,
-            memory_latency_us=same_node.penalty.memory_latency_us,
-            transfer_scale=same_node.penalty.transfer_scale,
-        ),
-        Locality.CROSS_NODE: LocalityPenalty(
-            compute_scale=cross_node.penalty.compute_scale,
-            memory_bandwidth_scale=cross_node.penalty.memory_bandwidth_scale,
-            memory_latency_us=cross_node.penalty.memory_latency_us,
-            transfer_scale=cross_node.penalty.transfer_scale,
-        ),
+        Locality.SAME_SOCKET: same_socket.penalty,
+        Locality.SAME_NODE: same_node.penalty,
+        Locality.CROSS_NODE: cross_node.penalty,
     }
     return profiles, penalties
 

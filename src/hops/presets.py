@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from hops.hardware.topology import LocalityPenalty
+
 
 @dataclass(frozen=True)
 class DevicePreset:
@@ -14,19 +16,11 @@ class DevicePreset:
 
 
 @dataclass(frozen=True)
-class LocalityPenaltyPreset:
-    compute_scale: float = 1.0
-    memory_bandwidth_scale: float = 1.0
-    memory_latency_us: float = 0.0
-    transfer_scale: float = 1.0
-
-
-@dataclass(frozen=True)
 class InterconnectPreset:
     bandwidth_gbps: float
     latency_us: float
     jitter: dict
-    penalty: LocalityPenaltyPreset = LocalityPenaltyPreset()
+    penalty: LocalityPenalty = LocalityPenalty()
 
 
 DEVICE_PRESETS: dict[str, DevicePreset] = {
@@ -63,7 +57,7 @@ INTERCONNECT_PRESETS: dict[str, InterconnectPreset] = {
         bandwidth_gbps=4800.0,
         latency_us=1.0,
         jitter={"type": "normal", "mean": 0.0, "std": 0.05},
-        penalty=LocalityPenaltyPreset(
+        penalty=LocalityPenalty(
             compute_scale=1.02,
             memory_bandwidth_scale=0.95,
             memory_latency_us=1.0,
@@ -74,7 +68,7 @@ INTERCONNECT_PRESETS: dict[str, InterconnectPreset] = {
         bandwidth_gbps=256.0,
         latency_us=2.5,
         jitter={"type": "normal", "mean": 0.0, "std": 0.1},
-        penalty=LocalityPenaltyPreset(
+        penalty=LocalityPenalty(
             compute_scale=1.05,
             memory_bandwidth_scale=0.85,
             memory_latency_us=3.0,
@@ -85,7 +79,7 @@ INTERCONNECT_PRESETS: dict[str, InterconnectPreset] = {
         bandwidth_gbps=200.0,
         latency_us=5.0,
         jitter={"type": "normal", "mean": 0.0, "std": 0.3},
-        penalty=LocalityPenaltyPreset(
+        penalty=LocalityPenalty(
             compute_scale=1.10,
             memory_bandwidth_scale=0.70,
             memory_latency_us=8.0,
@@ -96,7 +90,7 @@ INTERCONNECT_PRESETS: dict[str, InterconnectPreset] = {
         bandwidth_gbps=100.0,
         latency_us=15.0,
         jitter={"type": "normal", "mean": 0.0, "std": 1.0},
-        penalty=LocalityPenaltyPreset(
+        penalty=LocalityPenalty(
             compute_scale=1.15,
             memory_bandwidth_scale=0.60,
             memory_latency_us=12.0,
@@ -112,8 +106,10 @@ class PresetRegistry:
     def __init__(self,
                  device_presets: dict[str, DevicePreset] | None = None,
                  interconnect_presets: dict[str, InterconnectPreset] | None = None):
-        self._device_presets = device_presets or DEVICE_PRESETS
-        self._interconnect_presets = interconnect_presets or INTERCONNECT_PRESETS
+        self._device_presets = device_presets if device_presets is not None else dict(DEVICE_PRESETS)
+        self._interconnect_presets = (
+            interconnect_presets if interconnect_presets is not None else dict(INTERCONNECT_PRESETS)
+        )
 
     def device(self, name: str) -> DevicePreset:
         if name not in self._device_presets:

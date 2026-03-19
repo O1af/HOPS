@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from types import SimpleNamespace
 from typing import Protocol
 
 import numpy as np
@@ -85,98 +84,6 @@ class ComputeModel:
         if self._precision_speedup != 1.0:
             base /= self._precision_speedup
         return base
-
-    @staticmethod
-    def _stage_model_from_yaml(stage_cfg: dict, topology: Topology | None) -> StageLatencySource:
-        """Legacy compatibility constructor for pre-canonical configs."""
-        penalty_scale = 1.0
-        penalty_offset_ms = 0.0
-        memory_penalty_scale = 1.0
-        memory_penalty_latency_us = 0.0
-        if topology is not None:
-            memory_placement = None
-            if "memory_device_id" in stage_cfg:
-                memory_placement = SimpleNamespace(
-                    kind="device",
-                    device=stage_cfg["memory_device_id"],
-                )
-            elif "memory_socket_id" in stage_cfg or "memory_node_id" in stage_cfg:
-                memory_placement = SimpleNamespace(
-                    kind="socket",
-                    node=stage_cfg.get("memory_node_id"),
-                    socket=stage_cfg.get("memory_socket_id"),
-                )
-            penalty = topology.stage_locality_penalty(
-                device_id=stage_cfg["device"],
-                memory_placement=memory_placement,
-            )
-            penalty_scale = penalty.compute_scale
-            penalty_offset_ms = penalty.memory_latency_us / 1000.0
-            memory_penalty_scale = penalty.memory_bandwidth_scale
-            memory_penalty_latency_us = penalty.memory_latency_us
-
-        if "compute_latency" in stage_cfg:
-            return DistributionLatency(
-                Distribution.from_yaml(stage_cfg["compute_latency"]),
-                scale=penalty_scale,
-                offset_ms=penalty_offset_ms if stage_cfg.get("memory_access_mb", 0.0) > 0 else 0.0,
-            )
-
-        if "compute_workload_tflop" not in stage_cfg:
-            raise ValueError(
-                f"Stage {stage_cfg['id']} must define either 'compute_latency' "
-                "or 'compute_workload_tflop'"
-            )
-
-        if topology is None:
-            raise ValueError(
-                "Derived latency requires a topology with device capabilities"
-            )
-
-        device = topology.device(stage_cfg["device"])
-        if device.flops is None or device.flops <= 0:
-            raise ValueError(
-                f"Stage {stage_cfg['id']} uses derived latency but device "
-                f"{device.id!r} does not define a positive 'flops' value"
-            )
-
-        memory_access_mb = stage_cfg.get("memory_access_mb", 0.0)
-        memory_bandwidth = device.memory_bandwidth_gbps
-        if memory_access_mb > 0 and (memory_bandwidth is None or memory_bandwidth <= 0):
-            raise ValueError(
-                f"Stage {stage_cfg['id']} uses derived memory access but device "
-                f"{device.id!r} does not define a positive "
-                "'memory_bandwidth_gbps' value"
-            )
-
-        return DerivedLatency(
-            workload_tflop=stage_cfg["compute_workload_tflop"],
-            device_flops=device.flops,
-            memory_access_mb=memory_access_mb,
-            memory_bandwidth_gbps=memory_bandwidth or float("inf"),
-            efficiency=stage_cfg.get("compute_efficiency", 1.0),
-            memory_efficiency=stage_cfg.get("memory_efficiency", 1.0),
-            compute_scale=penalty_scale,
-            memory_bandwidth_scale=memory_penalty_scale,
-            memory_latency_us=memory_penalty_latency_us,
-            latency_scale=stage_cfg.get("latency_scale", 1.0),
-            jitter=Distribution.from_yaml(
-                stage_cfg.get("latency_jitter", {"type": "constant", "value": 0.0})
-            ),
-        )
-
-    @classmethod
-    def from_yaml(cls, config: dict, topology: Topology | None = None) -> "ComputeModel":
-        """Legacy compatibility constructor for pre-canonical configs."""
-        stage_models: dict[int, StageLatencySource] = {}
-        for stage_cfg in config["stages"]:
-            stage_models[stage_cfg["id"]] = cls._stage_model_from_yaml(stage_cfg, topology)
-        return cls(
-            stage_models,
-            config.get("backward_factor", 2.0),
-            config.get("backward_b_fraction", 0.5),
-            config.get("precision_speedup", 1.0),
-        )
 
     @staticmethod
     def _stage_model_from_config(stage: StageConfig, topology: Topology) -> StageLatencySource:

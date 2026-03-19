@@ -2,13 +2,14 @@
 
 import numpy as np
 
+from hops.config import parse_config
 from hops.core.event_engine import EventEngine
 from hops.core.pipeline import Pipeline, Stage
 from hops.core.scheduler import GPipeScheduler, OneFOneBScheduler
 from hops.core.types import Phase
 from hops.hardware.device import Device
 from hops.hardware.network import Link
-from hops.hardware.topology import Topology
+from hops.hardware.topology import Locality, LocalityPenalty, Topology
 from hops.latency.compute_model import ComputeModel
 from hops.latency.distributions import Constant
 from hops.metrics.collector import MetricsCollector
@@ -202,14 +203,32 @@ def test_derived_stage_latency_uses_device_capabilities():
             memory_bandwidth_gbps=400.0,
         )
     ], [])
-    model = ComputeModel.from_yaml({
-        "stages": [{
-            "id": 0,
-            "device": "gpu0",
-            "compute_workload_tflop": 10.0,
-            "memory_access_mb": 100.0,
-        }],
-    }, topology=topology)
+    config = parse_config({
+        "simulation": {"batches": 1, "microbatches": 1, "seed": 0},
+        "pipeline": {
+            "schedule": "gpipe",
+            "precision": "fp32",
+            "activation_mb": 0.0,
+            "backward_factor": 2.0,
+            "stages": [{
+                "device": "gpu0",
+                "weights_mb": 0.0,
+                "compute": {
+                    "mode": "analytical",
+                    "tflop": 10.0,
+                    "memory_mb": 100.0,
+                },
+            }],
+        },
+        "hardware": {
+            "devices": [{"id": "gpu0", "gpu": "a100", "node": "node0", "socket": 0}],
+            "interconnect": {"same_node": "nvlink", "cross_node": "infiniband"},
+        },
+        "optimizer": {"enabled": False},
+        "failure": {"enabled": False},
+        "output": {},
+    })
+    model = ComputeModel.from_pipeline_config(config.pipeline, topology=topology)
 
     sample = model.sample(0, Phase.FORWARD, rng)
     expected_compute = 1000.0 * 10.0 / 100.0
@@ -246,33 +265,58 @@ def test_link_utilization_and_contention_stats_are_reported():
 
 def test_derived_latency_applies_memory_locality_penalty():
     rng = np.random.default_rng(0)
-    topology = Topology.from_yaml({
-        "devices": [{
-            "id": "gpu0",
-            "kind": "gpu",
-            "memory_mb": 8192,
-            "flops": 100.0,
-            "memory_bandwidth_gbps": 400.0,
-            "node_id": "node0",
-            "socket_id": "socket0",
-        }],
-        "locality_penalties": {
-            "same_node": {
-                "compute_scale": 1.2,
-                "memory_bandwidth_scale": 0.5,
-                "memory_latency_us": 1000.0,
-            },
+    topology = Topology(
+        [
+            Device(
+                "gpu0",
+                "gpu",
+                8192,
+                flops=100.0,
+                memory_bandwidth_gbps=400.0,
+                node_id="node0",
+                socket_id="socket0",
+            )
+        ],
+        [],
+        locality_penalties={
+            Locality.SAME_NODE: LocalityPenalty(
+                compute_scale=1.2,
+                memory_bandwidth_scale=0.5,
+                memory_latency_us=1000.0,
+            ),
         },
+    )
+    config = parse_config({
+        "simulation": {"batches": 1, "microbatches": 1, "seed": 0},
+        "pipeline": {
+            "schedule": "gpipe",
+            "precision": "fp32",
+            "activation_mb": 0.0,
+            "backward_factor": 2.0,
+            "stages": [{
+                "device": "gpu0",
+                "weights_mb": 0.0,
+                "compute": {
+                    "mode": "analytical",
+                    "tflop": 10.0,
+                    "memory_mb": 100.0,
+                },
+                "memory_placement": {
+                    "kind": "socket",
+                    "node": "node0",
+                    "socket": "socket1",
+                },
+            }],
+        },
+        "hardware": {
+            "devices": [{"id": "gpu0", "gpu": "a100", "node": "node0", "socket": 0}],
+            "interconnect": {"same_node": "nvlink", "cross_node": "infiniband"},
+        },
+        "optimizer": {"enabled": False},
+        "failure": {"enabled": False},
+        "output": {},
     })
-    model = ComputeModel.from_yaml({
-        "stages": [{
-            "id": 0,
-            "device": "gpu0",
-            "compute_workload_tflop": 10.0,
-            "memory_access_mb": 100.0,
-            "memory_socket_id": "socket1",
-        }],
-    }, topology=topology)
+    model = ComputeModel.from_pipeline_config(config.pipeline, topology=topology)
 
     sample = model.sample(0, Phase.FORWARD, rng)
     expected_compute = (1000.0 * 10.0 / 100.0) * 1.2

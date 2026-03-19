@@ -98,64 +98,60 @@ class MetricsCollector:
     def microbatch_completion_times(self) -> dict[int, float]:
         return self._mb_completion_times
 
-    def _analyzer(self):
+    @property
+    def analyzer(self):
         return self._metrics_analyzer
 
     def trace_duration(self) -> float:
-        return self._analyzer().trace_duration()
+        return self.analyzer.trace_duration()
 
     def e2e_latencies(self) -> list[float]:
-        return self._analyzer().e2e_latencies()
+        return self.analyzer.e2e_latencies()
 
     def throughput(self) -> float:
-        return self._analyzer().throughput()
+        return self.analyzer.throughput()
 
     def total_compute_time(self) -> float:
-        return self._analyzer().total_compute_time()
+        return self.analyzer.total_compute_time()
 
     def total_transfer_time(self) -> float:
-        return self._analyzer().total_transfer_time()
+        return self.analyzer.total_transfer_time()
 
     def makespan(self) -> float:
-        return self._analyzer().makespan()
+        return self.analyzer.makespan()
 
     def stage_occupancy_intervals(self) -> dict[int, list[tuple[float, float]]]:
-        return self._analyzer().stage_occupancy_intervals()
+        return self.analyzer.stage_occupancy_intervals()
 
     def device_occupancy_intervals(self) -> dict[str, list[tuple[float, float]]]:
-        return self._analyzer().device_occupancy_intervals()
+        return self.analyzer.device_occupancy_intervals()
 
     def link_occupancy_intervals(self) -> dict[str, list[tuple[float, float]]]:
-        return self._analyzer().link_occupancy_intervals()
+        return self.analyzer.link_occupancy_intervals()
 
     def stage_idle_intervals(self) -> dict[int, list[tuple[float, float]]]:
-        return self._analyzer().stage_idle_intervals()
+        return self.analyzer.stage_idle_intervals()
 
     def per_stage_utilization(self) -> dict[int, float]:
-        return self._analyzer().per_stage_utilization()
+        return self.analyzer.per_stage_utilization()
 
     def per_device_utilization(self) -> dict[str, float]:
-        return self._analyzer().per_device_utilization()
+        return self.analyzer.per_device_utilization()
 
     def per_link_transfer_utilization(self) -> dict[str, float]:
-        return self._analyzer().per_link_transfer_utilization()
+        return self.analyzer.per_link_transfer_utilization()
 
     def transfer_contention_stats(self) -> dict[str, object]:
-        return self._analyzer().transfer_contention_stats()
+        return self.analyzer.transfer_contention_stats()
 
     def summary(self) -> dict[str, object]:
-        return self._analyzer().summary().to_dict()
-
-    def export_trace_csv(self, output_path: str) -> None:
-        from hops.metrics.exporter import TraceExporter
-
-        TraceExporter(self).write_csv(output_path)
+        return self.analyzer.summary().to_dict()
 
     def bubble_ratio(self) -> float:
-        return self._analyzer().bubble_ratio()
+        return self.analyzer.bubble_ratio()
 
     def peak_in_flight_per_stage(self) -> dict[int, int]:
-        return self._analyzer().peak_in_flight_per_stage()
+        return self.analyzer.peak_in_flight_per_stage()
 
     def reset(self) -> None:
         """Clear all records for a fresh simulation."""

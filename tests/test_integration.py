@@ -10,13 +10,8 @@ import numpy as np
 import yaml
 
 from hops.config import parse_config
-from hops.core.event_engine import EventEngine
-from hops.core.pipeline import Pipeline, Stage
 from hops.core.scheduler import GPipeScheduler, OneFOneBScheduler
 from hops.core.types import Phase
-from hops.hardware.topology import Topology
-from hops.latency.compute_model import ComputeModel
-from hops.metrics.collector import MetricsCollector
 from hops.runtime import build_runtime
 
 from .conftest import make_canonical_config, make_test_pipeline
@@ -77,74 +72,64 @@ def test_main_no_viz_does_not_require_matplotlib(tmp_path, monkeypatch):
 
 
 def test_topology_fabric_and_derived_latency_run_together():
-    rng = np.random.default_rng(0)
     config = {
-        "simulation": {"num_microbatches": 2, "num_batches": 1, "seed": 0},
+        "simulation": {"batches": 1, "microbatches": 2, "seed": 0},
         "pipeline": {
+            "schedule": "gpipe",
+            "precision": "fp32",
+            "activation_mb": 10.0,
+            "backward_factor": 2.0,
             "stages": [
                 {
-                    "id": 0,
                     "device": "n0_gpu0",
-                    "compute_workload_tflop": 8.0,
-                    "memory_access_mb": 200.0,
+                    "weights_mb": 0.0,
+                    "compute": {
+                        "mode": "analytical",
+                        "tflop": 8.0,
+                        "memory_mb": 200.0,
+                    },
                 },
                 {
-                    "id": 1,
                     "device": "n1_gpu0",
-                    "compute_workload_tflop": 12.0,
-                    "memory_access_mb": 200.0,
+                    "weights_mb": 0.0,
+                    "compute": {
+                        "mode": "analytical",
+                        "tflop": 12.0,
+                        "memory_mb": 200.0,
+                    },
                 },
             ],
         },
-        "scheduler": {"policy": "gpipe"},
         "hardware": {
             "devices": [
                 {
                     "id": "n0_gpu0",
-                    "kind": "gpu",
-                    "memory_mb": 8192,
-                    "flops": 200.0,
-                    "memory_bandwidth_gbps": 1000.0,
-                    "numa_node": 0,
+                    "gpu": "h100",
+                    "node": "n0",
+                    "socket": 0,
                 },
                 {
                     "id": "n1_gpu0",
-                    "kind": "gpu",
-                    "memory_mb": 8192,
-                    "flops": 100.0,
-                    "memory_bandwidth_gbps": 600.0,
-                    "numa_node": 0,
+                    "gpu": "a100",
+                    "node": "n1",
+                    "socket": 0,
                 },
             ],
-            "fabric": {
-                "cross_node": {
-                    "bandwidth_gbps": 200.0,
-                    "base_latency_us": 5.0,
-                    "jitter": {"type": "constant", "value": 0.0},
-                },
+            "interconnect": {
+                "same_node": "nvlink",
+                "cross_node": "infiniband",
             },
-            "activation_size_mb": 10.0,
         },
+        "optimizer": {"enabled": False},
+        "failure": {"enabled": False},
+        "output": {},
     }
 
-    topology = Topology.from_yaml(config["hardware"])
-    compute_model = ComputeModel.from_yaml(config["pipeline"], topology=topology)
-    collector = MetricsCollector()
-    engine = EventEngine()
-    pipeline = Pipeline(
-        [Stage(id=s["id"], device_id=s["device"]) for s in config["pipeline"]["stages"]],
-        engine,
-        topology,
-        compute_model,
-        GPipeScheduler(),
-        collector,
-        activation_size_mb=config["hardware"]["activation_size_mb"],
-        rng=rng,
-    )
+    runtime = build_runtime(parse_config(config))
+    runtime.pipeline.start_batch(runtime.num_microbatches)
+    runtime.engine.run()
 
-    pipeline.start_batch(2)
-    engine.run()
-
+    collector = runtime.collector
     assert collector.completed_microbatches == 2
     stage0_forward = next(
         r for r in collector.computes

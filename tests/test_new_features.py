@@ -13,7 +13,7 @@ from hops.core.scheduler import (
 from hops.core.types import AllreduceAlgo, Phase, Precision
 from hops.hardware.device import Device
 from hops.hardware.network import Link
-from hops.hardware.topology import Topology
+from hops.hardware.topology import LinkProfile, Locality, LocalityPenalty, Topology
 from hops.latency.compute_model import ComputeModel
 from hops.latency.distributions import Constant
 from hops.metrics.collector import MetricsCollector
@@ -272,24 +272,19 @@ class TestOverlapAndContention:
 
     def test_transfer_locality_penalty_scales_duration(self):
         rng = np.random.default_rng(0)
-        topology = Topology.from_yaml({
-            "devices": [
-                {"id": "n0_gpu0", "kind": "gpu", "memory_mb": 8192, "node_id": "n0", "socket_id": "s0"},
-                {"id": "n0_gpu1", "kind": "gpu", "memory_mb": 8192, "node_id": "n0", "socket_id": "s1"},
+        topology = Topology(
+            [
+                Device("n0_gpu0", "gpu", 8192, node_id="n0", socket_id="s0"),
+                Device("n0_gpu1", "gpu", 8192, node_id="n0", socket_id="s1"),
             ],
-            "fabric": {
-                "same_node": {
-                    "bandwidth_gbps": 800,
-                    "base_latency_us": 0.0,
-                    "jitter": {"type": "constant", "value": 0.0},
-                },
+            [],
+            link_profiles={
+                Locality.SAME_NODE: LinkProfile(800.0, 0.0, Constant(0.0)),
             },
-            "locality_penalties": {
-                "same_node": {
-                    "transfer_scale": 1.5,
-                },
+            locality_penalties={
+                Locality.SAME_NODE: LocalityPenalty(transfer_scale=1.5),
             },
-        })
+        )
         compute_model = ComputeModel({})
 
         from hops.core.timing import TimingModel
