@@ -89,6 +89,9 @@ class Reporter:
         if summary.failures.count:
             print(f"\nFailures: {summary.failures.count}")
             print(f"Total downtime: {summary.failures.total_downtime_ms:.2f} ms")
-            print(f"Lost work: {summary.failures.lost_work_ms:.2f} ms")
+            if summary.failures.lost_work_ms is None:
+                print("Lost work: n/a")
+            else:
+                print(f"Lost work: {summary.failures.lost_work_ms:.2f} ms")
 
         print("\n" + "=" * 60)

@@ -44,7 +44,7 @@ class OptimizerSummary:
 class FailureSummary:
     count: int = 0
     total_downtime_ms: float = 0.0
-    lost_work_ms: float = 0.0
+    lost_work_ms: float | None = None
 
 
 @dataclass(frozen=True)

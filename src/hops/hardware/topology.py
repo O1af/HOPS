@@ -146,6 +146,7 @@ class Topology:
 
     @classmethod
     def from_yaml(cls, config: dict) -> "Topology":
+        """Legacy compatibility constructor for pre-canonical hardware configs."""
         devices = [Device.from_yaml(d) for d in config["devices"]]
         links = [Link.from_yaml(lnk) for lnk in config.get("links", [])]
         fabric = config.get("fabric", {})

@@ -2,6 +2,7 @@
 
 import numpy as np
 
+from hops.config import FailureConfig
 from hops.core.event_engine import EventEngine
 from hops.core.pipeline import Pipeline, Stage
 from hops.core.scheduler import GPipeScheduler
@@ -22,12 +23,12 @@ def _make_failure_setup(device_fail_prob=0.0, check_interval=1.0, seed=0):
     collector = MetricsCollector()
     engine = EventEngine()
     config = {
-        "check_interval": check_interval,
-        "device_fail_prob": device_fail_prob,
-        "link_fail_prob": 0.0,
-        "recovery_time": 2.0,
+        "check_interval_ms": check_interval,
+        "device_failure_probability": device_fail_prob,
+        "link_failure_probability": 0.0,
+        "recovery_time_ms": 2.0,
     }
-    failure_engine = FailureEngine(engine, topology, collector, config, rng=rng)
+    failure_engine = FailureEngine(engine, topology, collector, FailureConfig(enabled=True, **config), rng=rng)
     return engine, failure_engine, collector
 
 
@@ -70,12 +71,19 @@ def test_device_failure_delays_compute_start():
         activation_size_mb=0.0,
         rng=rng,
     )
-    failure_engine = FailureEngine(engine, topology, collector, {
-        "check_interval": 1000.0,
-        "device_fail_prob": 0.0,
-        "link_fail_prob": 0.0,
-        "recovery_time": 10.0,
-    }, rng=rng)
+    failure_engine = FailureEngine(
+        engine,
+        topology,
+        collector,
+        FailureConfig(
+            enabled=True,
+            check_interval_ms=1000.0,
+            device_failure_probability=0.0,
+            link_failure_probability=0.0,
+            recovery_time_ms=10.0,
+        ),
+        rng=rng,
+    )
     pipeline.set_failure_engine(failure_engine)
 
     engine.schedule(Event(
@@ -109,12 +117,19 @@ def test_link_failure_delays_transfer_start():
         activation_size_mb=10.0,
         rng=rng,
     )
-    failure_engine = FailureEngine(engine, topology, collector, {
-        "check_interval": 1000.0,
-        "device_fail_prob": 0.0,
-        "link_fail_prob": 0.0,
-        "recovery_time": 15.0,
-    }, rng=rng)
+    failure_engine = FailureEngine(
+        engine,
+        topology,
+        collector,
+        FailureConfig(
+            enabled=True,
+            check_interval_ms=1000.0,
+            device_failure_probability=0.0,
+            link_failure_probability=0.0,
+            recovery_time_ms=15.0,
+        ),
+        rng=rng,
+    )
     pipeline.set_failure_engine(failure_engine)
 
     engine.schedule(Event(
@@ -149,12 +164,19 @@ def test_failure_enabled_batch_run_stops_when_pipeline_finishes():
         activation_size_mb=0.0,
         rng=rng,
     )
-    failure_engine = FailureEngine(engine, topology, collector, {
-        "check_interval": 1.0,
-        "device_fail_prob": 1.0,
-        "link_fail_prob": 1.0,
-        "recovery_time": 100.0,
-    }, rng=rng)
+    failure_engine = FailureEngine(
+        engine,
+        topology,
+        collector,
+        FailureConfig(
+            enabled=True,
+            check_interval_ms=1.0,
+            device_failure_probability=1.0,
+            link_failure_probability=1.0,
+            recovery_time_ms=100.0,
+        ),
+        rng=rng,
+    )
     pipeline.set_failure_engine(failure_engine)
 
     pipeline.start_batch(1)

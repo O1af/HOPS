@@ -78,6 +78,7 @@ hardware:
     - { id: node0_gpu0, gpu: h100, node: node0, socket: 0 }
     - { id: node1_gpu0, gpu: a100, node: node1, socket: 0 }
   interconnect:
+    # optional: same_socket: pcie
     same_node: nvlink
     cross_node: infiniband
 
@@ -201,6 +202,7 @@ HOPS reports:
 - **Transfer contention** — peak concurrency and contended-transfer fraction
 - **Optimizer step** — all-reduce time and weight update time (when enabled)
 - **Failure impact** — count, total downtime, and lost-work slot
+  Note: `lost_work_ms` is `null` until in-flight interruption/retry semantics are modeled.
 - **Peak memory per device**
 
 Machine-readable output uses one canonical summary JSON schema and a separate raw event trace CSV.

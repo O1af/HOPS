@@ -172,31 +172,40 @@ class MetricsAnalyzer:
         global_peak = 0
 
         for link_id, records in sorted(per_link.items()):
+            ordered = sorted(records, key=lambda record: (record.start_time, record.end_time))
             events: list[tuple[float, int]] = []
-            for record in records:
+            for record in ordered:
                 events.append((record.start_time, 1))
                 events.append((record.end_time, -1))
             events.sort(key=lambda item: (item[0], item[1]))
 
             active = 0
             peak = 0
-            contended = 0
-            for idx, record in enumerate(records):
-                overlapped = False
-                for other_idx, other in enumerate(records):
-                    if idx == other_idx:
-                        continue
-                    if record.start_time < other.end_time and other.start_time < record.end_time:
-                        overlapped = True
-                        break
-                if overlapped:
-                    contended += 1
+            overlaps_previous = [False] * len(ordered)
+            overlaps_future = [False] * len(ordered)
+
+            max_end_so_far = float("-inf")
+            for idx, record in enumerate(ordered):
+                if record.start_time < max_end_so_far:
+                    overlaps_previous[idx] = True
+                max_end_so_far = max(max_end_so_far, record.end_time)
+
+            min_future_start = float("inf")
+            for idx in range(len(ordered) - 1, -1, -1):
+                record = ordered[idx]
+                if record.end_time > min_future_start:
+                    overlaps_future[idx] = True
+                min_future_start = min(min_future_start, record.start_time)
+
+            contended = sum(
+                1 for idx in range(len(ordered)) if overlaps_previous[idx] or overlaps_future[idx]
+            )
 
             for _, delta in events:
                 active += delta
                 peak = max(peak, active)
 
-            count = len(records)
+            count = len(ordered)
             total_transfers += count
             total_contended += contended
             global_peak = max(global_peak, peak)
@@ -241,7 +250,7 @@ class MetricsAnalyzer:
         return FailureSummary(
             count=len(self.collector.failures),
             total_downtime_ms=total_downtime,
-            lost_work_ms=0.0,
+            lost_work_ms=None,
         )
 
     def latency_summary(self) -> LatencySummary:

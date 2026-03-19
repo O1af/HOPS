@@ -128,6 +128,33 @@ def test_build_runtime_resolves_interconnect_presets():
     assert link.base_latency_us == 1.0
 
 
+def test_build_runtime_resolves_same_socket_interconnect_override():
+    config = make_canonical_config()
+    config["pipeline"]["stages"] = [
+        {
+            "device": "gpu0",
+            "weights_mb": 0.0,
+            "compute": {"mode": "explicit", "distribution": {"type": "constant", "value": 1.0}},
+        },
+        {
+            "device": "gpu1",
+            "weights_mb": 0.0,
+            "compute": {"mode": "explicit", "distribution": {"type": "constant", "value": 1.0}},
+        },
+    ]
+    config["hardware"]["devices"] = [
+        {"id": "gpu0", "gpu": "a100", "node": "node0", "socket": 0},
+        {"id": "gpu1", "gpu": "a100", "node": "node0", "socket": 0},
+    ]
+    config["hardware"]["interconnect"]["same_socket"] = "pcie"
+
+    runtime = build_runtime(parse_config(config))
+
+    link = runtime.pipeline.topology.link("gpu0", "gpu1")
+    assert link.bandwidth_gbps == 256.0
+    assert link.base_latency_us == 2.5
+
+
 def test_device_override_takes_precedence_over_preset():
     config = make_canonical_config()
     config["overrides"] = {"devices": [{"id": "gpu0", "memory_mb": 12345.0}]}

@@ -88,6 +88,7 @@ class ComputeModel:
 
     @staticmethod
     def _stage_model_from_yaml(stage_cfg: dict, topology: Topology | None) -> StageLatencySource:
+        """Legacy compatibility constructor for pre-canonical configs."""
         penalty_scale = 1.0
         penalty_offset_ms = 0.0
         memory_penalty_scale = 1.0
@@ -166,6 +167,7 @@ class ComputeModel:
 
     @classmethod
     def from_yaml(cls, config: dict, topology: Topology | None = None) -> "ComputeModel":
+        """Legacy compatibility constructor for pre-canonical configs."""
         stage_models: dict[int, StageLatencySource] = {}
         for stage_cfg in config["stages"]:
             stage_models[stage_cfg["id"]] = cls._stage_model_from_yaml(stage_cfg, topology)

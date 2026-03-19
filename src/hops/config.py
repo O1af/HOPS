@@ -21,7 +21,7 @@ def _require_non_negative(value: float | int, label: str) -> None:
 def _require_distribution(config: dict, label: str) -> None:
     try:
         Distribution.from_yaml(config)
-    except Exception as exc:  # pragma: no cover - error message wrapper
+    except (ValueError, KeyError, TypeError) as exc:  # pragma: no cover - error message wrapper
         raise ValueError(f"Invalid distribution for {label}: {exc}") from exc
 
 
@@ -92,6 +92,7 @@ class DeviceSpec:
 
 @dataclass(frozen=True)
 class InterconnectConfig:
+    same_socket: str | None
     same_node: str
     cross_node: str
 
@@ -335,6 +336,7 @@ class ConfigParser:
         return HardwareConfig(
             devices=devices,
             interconnect=InterconnectConfig(
+                same_socket=interconnect_raw.get("same_socket"),
                 same_node=interconnect_raw["same_node"],
                 cross_node=interconnect_raw["cross_node"],
             ),

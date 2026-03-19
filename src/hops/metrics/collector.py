@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from hops.core.types import Phase
+
 
 @dataclass
 class ComputeRecord:
@@ -43,6 +45,8 @@ class MetricsCollector:
     """Append-only store for simulation events."""
 
     def __init__(self):
+        from hops.metrics.analyzer import MetricsAnalyzer
+
         self.computes: list[ComputeRecord] = []
         self.transfers: list[TransferRecord] = []
         self.failures: list[FailureRecord] = []
@@ -50,6 +54,7 @@ class MetricsCollector:
         self._mb_start_times: dict[int, float] = {}
         self._mb_completion_times: dict[int, float] = {}
         self.peak_memory_per_device: dict[str, float] = {}
+        self._metrics_analyzer = MetricsAnalyzer(self)
 
     def record_compute(self, stage_id: int, microbatch_id: int | None, phase: Phase,
                        device_id: str, start_time: float, end_time: float) -> None:
@@ -94,9 +99,7 @@ class MetricsCollector:
         return self._mb_completion_times
 
     def _analyzer(self):
-        from hops.metrics.analyzer import MetricsAnalyzer
-
-        return MetricsAnalyzer(self)
+        return self._metrics_analyzer
 
     def trace_duration(self) -> float:
         return self._analyzer().trace_duration()

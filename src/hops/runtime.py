@@ -67,13 +67,15 @@ def _resolve_device(spec: DeviceSpec, overrides: dict[str, object], registry: Pr
 
 def _resolve_link_profiles(config: AppConfig, registry: PresetRegistry
                            ) -> tuple[dict[Locality, LinkProfile], dict[Locality, LocalityPenalty]]:
+    same_socket_name = config.hardware.interconnect.same_socket or config.hardware.interconnect.same_node
+    same_socket = registry.interconnect(same_socket_name)
     same_node = registry.interconnect(config.hardware.interconnect.same_node)
     cross_node = registry.interconnect(config.hardware.interconnect.cross_node)
     profiles = {
         Locality.SAME_SOCKET: LinkProfile(
-            bandwidth_gbps=same_node.bandwidth_gbps,
-            base_latency_us=same_node.latency_us,
-            jitter=Distribution.from_yaml(same_node.jitter),
+            bandwidth_gbps=same_socket.bandwidth_gbps,
+            base_latency_us=same_socket.latency_us,
+            jitter=Distribution.from_yaml(same_socket.jitter),
         ),
         Locality.SAME_NODE: LinkProfile(
             bandwidth_gbps=same_node.bandwidth_gbps,
@@ -87,7 +89,12 @@ def _resolve_link_profiles(config: AppConfig, registry: PresetRegistry
         ),
     }
     penalties = {
-        Locality.SAME_SOCKET: LocalityPenalty(),
+        Locality.SAME_SOCKET: LocalityPenalty(
+            compute_scale=same_socket.penalty.compute_scale,
+            memory_bandwidth_scale=same_socket.penalty.memory_bandwidth_scale,
+            memory_latency_us=same_socket.penalty.memory_latency_us,
+            transfer_scale=same_socket.penalty.transfer_scale,
+        ),
         Locality.SAME_NODE: LocalityPenalty(
             compute_scale=same_node.penalty.compute_scale,
             memory_bandwidth_scale=same_node.penalty.memory_bandwidth_scale,
@@ -196,12 +203,7 @@ def build_runtime(config: AppConfig, registry: PresetRegistry | None = None) -> 
             engine=engine,
             topology=topology,
             collector=collector,
-            config={
-                "check_interval": config.failure.check_interval_ms,
-                "device_fail_prob": config.failure.device_failure_probability,
-                "link_fail_prob": config.failure.link_failure_probability,
-                "recovery_time": config.failure.recovery_time_ms,
-            },
+            config=config.failure,
             rng=rng,
         ))
 
