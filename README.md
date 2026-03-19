@@ -187,7 +187,7 @@ class MyScheduler(Scheduler):
 register_scheduler("my_policy", MyScheduler)
 ```
 
-Then set `policy: my_policy` in your YAML config.
+Then set `pipeline.schedule: my_policy` in your YAML config.
 
 ## Metrics
 

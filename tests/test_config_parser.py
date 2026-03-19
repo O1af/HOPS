@@ -44,6 +44,11 @@ def test_parse_valid_analytical_stage_config():
 )
 def test_parse_memory_placement_modes(memory_placement, expected_kind):
     config = make_canonical_config()
+    config["pipeline"]["stages"][0]["compute"] = {
+        "mode": "analytical",
+        "tflop": 4.0,
+        "memory_mb": 64.0,
+    }
     config["pipeline"]["stages"][0]["memory_placement"] = memory_placement
 
     parsed = parse_config(config)
@@ -65,6 +70,37 @@ def test_build_runtime_rejects_unknown_device_preset():
 
     with pytest.raises(ValueError, match="Unknown hardware preset"):
         build_runtime(parse_config(config))
+
+
+def test_parse_rejects_duplicate_device_ids():
+    config = make_canonical_config()
+    config["hardware"]["devices"].append(
+        {"id": "gpu0", "gpu": "h100", "node": "node1", "socket": 0}
+    )
+
+    with pytest.raises(ValueError, match="duplicate ids"):
+        parse_config(config)
+
+
+def test_build_runtime_rejects_kind_mismatched_preset():
+    config = make_canonical_config()
+    del config["hardware"]["devices"][0]["gpu"]
+    config["hardware"]["devices"][0]["cpu"] = "h100"
+
+    with pytest.raises(ValueError, match="preset usage"):
+        build_runtime(parse_config(config))
+
+
+def test_parse_rejects_memory_placement_for_explicit_stage():
+    config = make_canonical_config()
+    config["pipeline"]["stages"][0]["memory_placement"] = {
+        "kind": "socket",
+        "node": "node0",
+        "socket": 1,
+    }
+
+    with pytest.raises(ValueError, match="only supported for analytical compute mode"):
+        parse_config(config)
 
 
 def test_build_runtime_resolves_interconnect_presets():

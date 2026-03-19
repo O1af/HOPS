@@ -34,6 +34,11 @@ class SimulationRuntime:
 
 def _resolve_device(spec: DeviceSpec, overrides: dict[str, object], registry: PresetRegistry) -> Device:
     preset = registry.device(spec.preset)
+    if preset.kind != spec.kind:
+        raise ValueError(
+            f"Device {spec.id!r} declares {spec.kind!r} preset usage but "
+            f"preset {spec.preset!r} is of kind {preset.kind!r}"
+        )
     override = overrides.get(spec.id)
     memory_mb = override.memory_mb if override and override.memory_mb is not None else preset.memory_mb
     flops_tflops = (

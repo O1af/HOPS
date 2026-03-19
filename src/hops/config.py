@@ -273,6 +273,11 @@ class ConfigParser:
             )
 
         if mode == "explicit":
+            if memory_placement.kind != "local":
+                raise ValueError(
+                    f"pipeline.stages[{stage_id}].memory_placement is only supported "
+                    "for analytical compute mode"
+                )
             if "distribution" not in compute_raw:
                 raise ValueError(
                     f"pipeline.stages[{stage_id}].compute with mode=explicit "
@@ -323,6 +328,9 @@ class ConfigParser:
         devices = [self._parse_device(idx, device_raw) for idx, device_raw in enumerate(raw["devices"])]
         if not devices:
             raise ValueError("hardware.devices must contain at least one device")
+        device_ids = [device.id for device in devices]
+        if len(set(device_ids)) != len(device_ids):
+            raise ValueError(f"hardware.devices contains duplicate ids: {device_ids}")
         interconnect_raw = raw["interconnect"]
         return HardwareConfig(
             devices=devices,
