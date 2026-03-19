@@ -1,10 +1,8 @@
-"""Runtime statistics accumulation."""
+"""Raw runtime event collection."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-
-from hops.core.types import Phase
 
 
 @dataclass
@@ -42,7 +40,7 @@ class InFlightRecord:
 
 
 class MetricsCollector:
-    """Collects simulation events and computes derived metrics."""
+    """Append-only store for simulation events."""
 
     def __init__(self):
         self.computes: list[ComputeRecord] = []
@@ -87,94 +85,74 @@ class MetricsCollector:
     def completed_microbatches(self) -> int:
         return len(self._mb_completion_times)
 
+    @property
+    def microbatch_start_times(self) -> dict[int, float]:
+        return self._mb_start_times
+
+    @property
+    def microbatch_completion_times(self) -> dict[int, float]:
+        return self._mb_completion_times
+
+    def _analyzer(self):
+        from hops.metrics.analyzer import MetricsAnalyzer
+
+        return MetricsAnalyzer(self)
+
+    def trace_duration(self) -> float:
+        return self._analyzer().trace_duration()
+
     def e2e_latencies(self) -> list[float]:
-        """Per-microbatch end-to-end latency."""
-        return [self._mb_completion_times[mb] - self._mb_start_times[mb]
-                for mb in sorted(self._mb_completion_times)
-                if mb in self._mb_start_times]
+        return self._analyzer().e2e_latencies()
 
     def throughput(self) -> float:
-        """Micro-batches per time unit."""
-        if not self._mb_completion_times:
-            return 0.0
-        total_time = max(self._mb_completion_times.values()) - min(
-            self._mb_start_times[mb] for mb in self._mb_completion_times)
-        if total_time <= 0:
-            return 0.0
-        return len(self._mb_completion_times) / total_time
+        return self._analyzer().throughput()
 
     def total_compute_time(self) -> float:
-        return sum(r.end_time - r.start_time for r in self.computes)
+        return self._analyzer().total_compute_time()
 
     def total_transfer_time(self) -> float:
-        return sum(t.end_time - t.start_time for t in self.transfers)
+        return self._analyzer().total_transfer_time()
 
     def makespan(self) -> float:
-        if not self.computes:
-            return 0.0
-        return max(r.end_time for r in self.computes) - min(r.start_time for r in self.computes)
+        return self._analyzer().makespan()
 
     def stage_occupancy_intervals(self) -> dict[int, list[tuple[float, float]]]:
-        intervals: dict[int, list[tuple[float, float]]] = {}
-        for record in sorted(self.computes, key=lambda r: (r.stage_id, r.start_time, r.end_time)):
-            stage_intervals = intervals.setdefault(record.stage_id, [])
-            if not stage_intervals or record.start_time > stage_intervals[-1][1]:
-                stage_intervals.append((record.start_time, record.end_time))
-                continue
-            start, end = stage_intervals[-1]
-            stage_intervals[-1] = (start, max(end, record.end_time))
-        return intervals
+        return self._analyzer().stage_occupancy_intervals()
+
+    def device_occupancy_intervals(self) -> dict[str, list[tuple[float, float]]]:
+        return self._analyzer().device_occupancy_intervals()
+
+    def link_occupancy_intervals(self) -> dict[str, list[tuple[float, float]]]:
+        return self._analyzer().link_occupancy_intervals()
 
     def stage_idle_intervals(self) -> dict[int, list[tuple[float, float]]]:
-        occupancy = self.stage_occupancy_intervals()
-        if not occupancy:
-            return {}
-
-        trace_start = min(start for intervals in occupancy.values() for start, _ in intervals)
-        trace_end = max(end for intervals in occupancy.values() for _, end in intervals)
-        idle: dict[int, list[tuple[float, float]]] = {}
-
-        for stage_id, intervals in occupancy.items():
-            stage_idle: list[tuple[float, float]] = []
-            cursor = trace_start
-            for start, end in intervals:
-                if start > cursor:
-                    stage_idle.append((cursor, start))
-                cursor = max(cursor, end)
-            if cursor < trace_end:
-                stage_idle.append((cursor, trace_end))
-            idle[stage_id] = stage_idle
-        return idle
+        return self._analyzer().stage_idle_intervals()
 
     def per_stage_utilization(self) -> dict[int, float]:
-        """Fraction of total time each stage spent computing."""
-        occupancy = self.stage_occupancy_intervals()
-        if not occupancy:
-            return {}
-        total_time = self.makespan()
-        if total_time <= 0:
-            return {}
-        return {
-            stage_id: sum(end - start for start, end in intervals) / total_time
-            for stage_id, intervals in sorted(occupancy.items())
-        }
+        return self._analyzer().per_stage_utilization()
+
+    def per_device_utilization(self) -> dict[str, float]:
+        return self._analyzer().per_device_utilization()
+
+    def per_link_transfer_utilization(self) -> dict[str, float]:
+        return self._analyzer().per_link_transfer_utilization()
+
+    def transfer_contention_stats(self) -> dict[str, object]:
+        return self._analyzer().transfer_contention_stats()
+
+    def summary(self) -> dict[str, object]:
+        return self._analyzer().summary().to_dict()
+
+    def export_trace_csv(self, output_path: str) -> None:
+        from hops.metrics.exporter import TraceExporter
+
+        TraceExporter(self).write_csv(output_path)
 
     def bubble_ratio(self) -> float:
-        """Fraction of total device-time that is idle (pipeline bubbles)."""
-        idle = self.stage_idle_intervals()
-        if not idle:
-            return 0.0
-        total_time = self.makespan()
-        if total_time <= 0:
-            return 0.0
-        total_idle = sum(end - start for intervals in idle.values() for start, end in intervals)
-        return total_idle / (total_time * len(idle))
+        return self._analyzer().bubble_ratio()
 
     def peak_in_flight_per_stage(self) -> dict[int, int]:
-        peaks: dict[int, int] = {}
-        for record in self.in_flight:
-            peaks[record.stage_id] = max(peaks.get(record.stage_id, 0), record.count)
-        return peaks
+        return self._analyzer().peak_in_flight_per_stage()
 
     def reset(self) -> None:
         """Clear all records for a fresh simulation."""

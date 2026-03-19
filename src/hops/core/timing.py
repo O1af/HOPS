@@ -81,6 +81,7 @@ class TimingModel:
         base_ms = link.base_latency_us / 1000.0
         transfer_ms = (size_mb * 8.0) / effective_bw
         duration = base_ms + transfer_ms + link.jitter.sample(self.rng)
+        duration *= self.topology.transfer_penalty(src_device, dst_device).transfer_scale
         end_time = start_time + duration
         return start_time, end_time
 

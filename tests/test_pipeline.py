@@ -189,3 +189,92 @@ def test_optimizer_disabled_by_default():
     opt_computes = [r for r in collector.computes if r.phase == Phase.OPTIMIZER]
     assert len(opt_computes) == 0
     assert pipeline.batch_complete
+
+
+def test_derived_stage_latency_uses_device_capabilities():
+    rng = np.random.default_rng(0)
+    topology = Topology([
+        Device(
+            "gpu0",
+            "gpu",
+            8192,
+            flops=100.0,
+            memory_bandwidth_gbps=400.0,
+        )
+    ], [])
+    model = ComputeModel.from_yaml({
+        "stages": [{
+            "id": 0,
+            "device": "gpu0",
+            "compute_workload_tflop": 10.0,
+            "memory_access_mb": 100.0,
+        }],
+    }, topology=topology)
+
+    sample = model.sample(0, Phase.FORWARD, rng)
+    expected_compute = 1000.0 * 10.0 / 100.0
+    expected_memory = (100.0 * 8.0) / 400.0
+    assert abs(sample - (expected_compute + expected_memory)) < 1e-9
+
+
+def test_per_device_utilization_aggregates_compute_on_shared_device():
+    collector = MetricsCollector()
+    collector.record_compute(0, 0, Phase.FORWARD, "gpu0", 0.0, 2.0)
+    collector.record_compute(1, 0, Phase.BACKWARD, "gpu0", 2.0, 5.0)
+    collector.record_compute(2, 0, Phase.FORWARD, "gpu1", 1.0, 4.0)
+
+    util = collector.per_device_utilization()
+
+    assert util["gpu0"] == 1.0
+    assert abs(util["gpu1"] - 0.6) < 1e-9
+
+
+def test_link_utilization_and_contention_stats_are_reported():
+    collector = MetricsCollector()
+    collector.record_transfer(0, Phase.FORWARD, "gpu0", "gpu1", 0.0, 2.0)
+    collector.record_transfer(1, Phase.FORWARD, "gpu0", "gpu1", 1.0, 3.0)
+    collector.record_transfer(2, Phase.BACKWARD, "gpu1", "gpu0", 0.0, 1.0)
+
+    link_util = collector.per_link_transfer_utilization()
+    contention = collector.transfer_contention_stats()
+
+    assert link_util["gpu0->gpu1"] == 1.0
+    assert abs(link_util["gpu1->gpu0"] - (1.0 / 3.0)) < 1e-9
+    assert contention["global_peak_concurrency"] == 2.0
+    assert contention["per_link"]["gpu0->gpu1"]["contended_transfer_fraction"] == 1.0
+
+
+def test_derived_latency_applies_memory_locality_penalty():
+    rng = np.random.default_rng(0)
+    topology = Topology.from_yaml({
+        "devices": [{
+            "id": "gpu0",
+            "kind": "gpu",
+            "memory_mb": 8192,
+            "flops": 100.0,
+            "memory_bandwidth_gbps": 400.0,
+            "node_id": "node0",
+            "socket_id": "socket0",
+        }],
+        "locality_penalties": {
+            "same_node": {
+                "compute_scale": 1.2,
+                "memory_bandwidth_scale": 0.5,
+                "memory_latency_us": 1000.0,
+            },
+        },
+    })
+    model = ComputeModel.from_yaml({
+        "stages": [{
+            "id": 0,
+            "device": "gpu0",
+            "compute_workload_tflop": 10.0,
+            "memory_access_mb": 100.0,
+            "memory_socket_id": "socket1",
+        }],
+    }, topology=topology)
+
+    sample = model.sample(0, Phase.FORWARD, rng)
+    expected_compute = (1000.0 * 10.0 / 100.0) * 1.2
+    expected_memory = (100.0 * 8.0) / (400.0 * 0.5) + 1.0
+    assert abs(sample - (expected_compute + expected_memory)) < 1e-9

@@ -1,64 +1,94 @@
 """Throughput, bubble ratio, and utilization reporting."""
 
-import numpy as np
+import json
+from pathlib import Path
 
-from hops.core.types import Phase
+from hops.metrics.analyzer import MetricsAnalyzer
 from hops.metrics.collector import MetricsCollector
+from hops.metrics.summary import SimulationSummary
 
 
 class Reporter:
     """Prints a summary of simulation metrics."""
 
-    def __init__(self, collector: MetricsCollector):
-        self.collector = collector
+    def __init__(self, metrics: MetricsCollector | MetricsAnalyzer):
+        if isinstance(metrics, MetricsAnalyzer):
+            self.analyzer = metrics
+        else:
+            self.analyzer = MetricsAnalyzer(metrics)
+
+    def summary(self) -> dict[str, object]:
+        return self.summary_model().to_dict()
+
+    def summary_model(self) -> SimulationSummary:
+        return self.analyzer.summary()
+
+    def write_summary_json(self, output_path: str) -> None:
+        path = Path(output_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("w", encoding="utf-8") as f:
+            json.dump(self.summary(), f, indent=2, sort_keys=True)
 
     def print_summary(self) -> None:
-        c = self.collector
+        summary = self.summary_model()
         print("\n" + "=" * 60)
         print("HOPS Simulation Report")
         print("=" * 60)
 
-        print(f"\nMicro-batches completed: {c.completed_microbatches}")
-        print(f"Throughput: {c.throughput():.4f} micro-batches/ms")
+        print(f"\nMicro-batches completed: {summary.completed_microbatches}")
+        print(f"Throughput: {summary.throughput.per_ms:.4f} micro-batches/ms")
+        print(f"            {summary.throughput.per_s:.2f} micro-batches/s")
 
-        latencies = c.e2e_latencies()
-        if latencies:
-            arr = np.array(latencies)
-            print(f"\nEnd-to-end latency:")
-            print(f"  p50: {np.percentile(arr, 50):.2f} ms")
-            print(f"  p99: {np.percentile(arr, 99):.2f} ms")
-            print(f"  mean: {np.mean(arr):.2f} ms")
+        if summary.latency_ms.mean_ms is not None:
+            print("\nEnd-to-end latency:")
+            print(f"  p50: {summary.latency_ms.p50_ms:.2f} ms")
+            print(f"  p99: {summary.latency_ms.p99_ms:.2f} ms")
+            print(f"  mean: {summary.latency_ms.mean_ms:.2f} ms")
 
-        print(f"\nBubble ratio: {c.bubble_ratio():.2%}")
+        print(f"\nBubble ratio: {summary.bubble_ratio:.2%}")
 
-        util = c.per_stage_utilization()
-        if util:
+        if summary.utilization.per_stage:
             print("\nPer-stage utilization:")
-            for stage_id, u in util.items():
+            for stage_id, u in summary.utilization.per_stage.items():
                 print(f"  Stage {stage_id}: {u:.2%}")
 
-        total_compute = c.total_compute_time()
-        total_transfer = c.total_transfer_time()
-        if total_compute > 0 and c.transfers:
-            print(f"\nCommunication overhead: {total_transfer / total_compute:.2%} of compute")
+        if summary.utilization.per_device:
+            print("\nPer-device utilization:")
+            for device_id, u in summary.utilization.per_device.items():
+                print(f"  {device_id}: {u:.2%}")
 
-        optimizer_compute = sum(
-            r.end_time - r.start_time for r in c.computes if r.phase == Phase.OPTIMIZER)
-        optimizer_transfer = sum(
-            t.end_time - t.start_time for t in c.transfers if t.phase == Phase.OPTIMIZER)
-        if optimizer_compute > 0 or optimizer_transfer > 0:
+        if summary.time_ms.compute_ms > 0:
+            print(
+                "\nCommunication overhead: "
+                f"{summary.time_ms.communication_overhead_ratio:.2%} of compute"
+            )
+
+        if summary.utilization.per_link:
+            print("\nPer-link transfer utilization:")
+            for link_id, u in summary.utilization.per_link.items():
+                print(f"  {link_id}: {u:.2%}")
+
+        if summary.contention.per_link:
+            print("\nTransfer contention:")
+            print(f"  Global peak concurrency: {summary.contention.global_peak_concurrency:.0f}")
+            print(
+                "  Contended transfer fraction: "
+                f"{summary.contention.global_contended_transfer_fraction:.2%}"
+            )
+
+        if summary.optimizer.allreduce_time_ms > 0 or summary.optimizer.weight_update_time_ms > 0:
             print(f"\nOptimizer step:")
-            print(f"  All-reduce time: {optimizer_transfer:.2f} ms")
-            print(f"  Weight update time: {optimizer_compute:.2f} ms")
+            print(f"  All-reduce time: {summary.optimizer.allreduce_time_ms:.2f} ms")
+            print(f"  Weight update time: {summary.optimizer.weight_update_time_ms:.2f} ms")
 
-        if c.peak_memory_per_device:
+        if summary.memory.peak_per_device_mb:
             print(f"\nPeak memory per device:")
-            for device_id, peak in sorted(c.peak_memory_per_device.items()):
+            for device_id, peak in sorted(summary.memory.peak_per_device_mb.items()):
                 print(f"  {device_id}: {peak:.1f} MB")
 
-        if c.failures:
-            print(f"\nFailures: {len(c.failures)}")
-            total_downtime = sum(f.recovery_time for f in c.failures)
-            print(f"Total downtime: {total_downtime:.2f} ms")
+        if summary.failures.count:
+            print(f"\nFailures: {summary.failures.count}")
+            print(f"Total downtime: {summary.failures.total_downtime_ms:.2f} ms")
+            print(f"Lost work: {summary.failures.lost_work_ms:.2f} ms")
 
         print("\n" + "=" * 60)

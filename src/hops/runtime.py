@@ -1,0 +1,212 @@
+"""Runtime assembly for validated HOPS configs."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+import numpy as np
+
+from hops.config import AppConfig, DeviceSpec, LinkOverride, OutputConfig
+from hops.core.event_engine import EventEngine
+from hops.core.pipeline import Pipeline, Stage
+from hops.core.scheduler import make_scheduler, max_in_flight_count
+from hops.failure.engine import FailureEngine
+from hops.hardware.device import Device
+from hops.hardware.network import Link
+from hops.hardware.topology import LinkProfile, Locality, LocalityPenalty, Topology
+from hops.latency.compute_model import ComputeModel
+from hops.latency.distributions import Distribution
+from hops.metrics.collector import MetricsCollector
+from hops.metrics.reporter import Reporter
+from hops.presets import PresetRegistry
+
+
+@dataclass
+class SimulationRuntime:
+    engine: EventEngine
+    pipeline: Pipeline
+    collector: MetricsCollector
+    reporter: Reporter
+    output_config: OutputConfig
+    num_batches: int
+    num_microbatches: int
+
+
+def _resolve_device(spec: DeviceSpec, overrides: dict[str, object], registry: PresetRegistry) -> Device:
+    preset = registry.device(spec.preset)
+    override = overrides.get(spec.id)
+    memory_mb = override.memory_mb if override and override.memory_mb is not None else preset.memory_mb
+    flops_tflops = (
+        override.flops_tflops
+        if override and override.flops_tflops is not None
+        else preset.flops_tflops
+    )
+    memory_bandwidth_gbps = (
+        override.memory_bandwidth_gbps
+        if override and override.memory_bandwidth_gbps is not None
+        else preset.memory_bandwidth_gbps
+    )
+    socket_digits = "".join(ch for ch in spec.socket if ch.isdigit())
+    numa_node = int(socket_digits) if socket_digits else 0
+    return Device(
+        id=spec.id,
+        kind=preset.kind,
+        memory_mb=memory_mb,
+        flops=flops_tflops,
+        memory_bandwidth_gbps=memory_bandwidth_gbps,
+        node_id=spec.node,
+        socket_id=spec.socket,
+        numa_node=numa_node,
+    )
+
+
+def _resolve_link_profiles(config: AppConfig, registry: PresetRegistry
+                           ) -> tuple[dict[Locality, LinkProfile], dict[Locality, LocalityPenalty]]:
+    same_node = registry.interconnect(config.hardware.interconnect.same_node)
+    cross_node = registry.interconnect(config.hardware.interconnect.cross_node)
+    profiles = {
+        Locality.SAME_SOCKET: LinkProfile(
+            bandwidth_gbps=same_node.bandwidth_gbps,
+            base_latency_us=same_node.latency_us,
+            jitter=Distribution.from_yaml(same_node.jitter),
+        ),
+        Locality.SAME_NODE: LinkProfile(
+            bandwidth_gbps=same_node.bandwidth_gbps,
+            base_latency_us=same_node.latency_us,
+            jitter=Distribution.from_yaml(same_node.jitter),
+        ),
+        Locality.CROSS_NODE: LinkProfile(
+            bandwidth_gbps=cross_node.bandwidth_gbps,
+            base_latency_us=cross_node.latency_us,
+            jitter=Distribution.from_yaml(cross_node.jitter),
+        ),
+    }
+    penalties = {
+        Locality.SAME_SOCKET: LocalityPenalty(),
+        Locality.SAME_NODE: LocalityPenalty(
+            compute_scale=same_node.penalty.compute_scale,
+            memory_bandwidth_scale=same_node.penalty.memory_bandwidth_scale,
+            memory_latency_us=same_node.penalty.memory_latency_us,
+            transfer_scale=same_node.penalty.transfer_scale,
+        ),
+        Locality.CROSS_NODE: LocalityPenalty(
+            compute_scale=cross_node.penalty.compute_scale,
+            memory_bandwidth_scale=cross_node.penalty.memory_bandwidth_scale,
+            memory_latency_us=cross_node.penalty.memory_latency_us,
+            transfer_scale=cross_node.penalty.transfer_scale,
+        ),
+    }
+    return profiles, penalties
+
+
+def _resolve_link_overrides(link_overrides: list[LinkOverride]) -> list[Link]:
+    return [
+        Link(
+            src=override.src,
+            dst=override.dst,
+            bandwidth_gbps=override.bandwidth_gbps,
+            base_latency_us=override.latency_us,
+            jitter=Distribution.from_yaml(override.jitter),
+        )
+        for override in link_overrides
+    ]
+
+
+def validate_memory(config: AppConfig, topology: Topology) -> None:
+    eff_activation = config.pipeline.activation_mb * config.pipeline.precision.data_scale
+    weight_overhead = config.pipeline.precision.weight_memory_overhead
+    usage_by_device: dict[str, dict[str, float]] = {}
+
+    for stage in config.pipeline.stages:
+        device = topology.device(stage.device)
+        usage = usage_by_device.setdefault(
+            device.id,
+            {"weights_mb": 0.0, "activations_mb": 0.0},
+        )
+        usage["weights_mb"] += stage.weights_mb * weight_overhead
+        usage["activations_mb"] += (
+            eff_activation
+            * max_in_flight_count(
+                config.pipeline.schedule,
+                stage.id,
+                len(config.pipeline.stages),
+                config.simulation.microbatches,
+            )
+        )
+
+    for device_id, usage in usage_by_device.items():
+        device = topology.device(device_id)
+        peak = usage["weights_mb"] + usage["activations_mb"]
+        if peak > device.memory_mb:
+            raise ValueError(
+                f"Device {device.id}: peak memory {peak:.1f} MB exceeds device capacity "
+                f"{device.memory_mb:.1f} MB (weights={usage['weights_mb']:.1f} MB, "
+                f"activations={usage['activations_mb']:.1f} MB)"
+            )
+
+
+def build_runtime(config: AppConfig, registry: PresetRegistry | None = None) -> SimulationRuntime:
+    registry = registry or PresetRegistry()
+    rng = np.random.default_rng(config.simulation.seed)
+    device_overrides = {override.id: override for override in config.overrides.devices}
+    devices = [_resolve_device(spec, device_overrides, registry) for spec in config.hardware.devices]
+    profiles, penalties = _resolve_link_profiles(config, registry)
+    topology = Topology(
+        devices=devices,
+        links=_resolve_link_overrides(config.overrides.links),
+        link_profiles=profiles,
+        locality_penalties=penalties,
+    )
+    validate_memory(config, topology)
+
+    compute_model = ComputeModel.from_pipeline_config(config.pipeline, topology=topology)
+    scheduler = make_scheduler({"policy": config.pipeline.schedule})
+    collector = MetricsCollector()
+    engine = EventEngine()
+    stages = [Stage(id=stage.id, device_id=stage.device) for stage in config.pipeline.stages]
+
+    optimizer_latency = None
+    if config.optimizer.enabled and config.optimizer.update_distribution is not None:
+        optimizer_latency = Distribution.from_yaml(config.optimizer.update_distribution)
+
+    pipeline = Pipeline(
+        stages=stages,
+        engine=engine,
+        topology=topology,
+        compute_model=compute_model,
+        scheduler=scheduler,
+        collector=collector,
+        activation_size_mb=config.pipeline.activation_mb,
+        rng=rng,
+        optimizer_latency=optimizer_latency,
+        gradient_size_mb=config.optimizer.gradient_mb,
+        stage_memory_mb={stage.id: stage.weights_mb for stage in config.pipeline.stages},
+        gradient_accumulation_steps=config.optimizer.accumulation_steps,
+        precision=config.pipeline.precision,
+        allreduce_algo=config.optimizer.allreduce_algorithm,
+    )
+
+    if config.failure.enabled:
+        pipeline.set_failure_engine(FailureEngine(
+            engine=engine,
+            topology=topology,
+            collector=collector,
+            config={
+                "check_interval": config.failure.check_interval_ms,
+                "device_fail_prob": config.failure.device_failure_probability,
+                "link_fail_prob": config.failure.link_failure_probability,
+                "recovery_time": config.failure.recovery_time_ms,
+            },
+            rng=rng,
+        ))
+
+    reporter = Reporter(collector)
+    return SimulationRuntime(
+        engine=engine,
+        pipeline=pipeline,
+        collector=collector,
+        reporter=reporter,
+        output_config=config.output,
+        num_batches=config.simulation.batches,
+        num_microbatches=config.simulation.microbatches,
+    )

@@ -32,58 +32,138 @@ uv run pytest -v           # verbose output
 
 ## Configuration
 
-Simulations are defined via YAML configs in `configs/`. See `configs/default.yaml` for a full example. Key sections:
+HOPS now uses a canonical preset-first schema with these top-level sections:
+
+- `simulation`
+- `pipeline`
+- `hardware`
+- `optimizer`
+- `failure`
+- `output`
+- optional `overrides`
+
+The default path is intentionally short: stages describe the work, `hardware` describes available devices and interconnect presets, and HOPS resolves the concrete capabilities internally.
 
 ```yaml
 simulation:
-  num_microbatches: 8
-  num_batches: 4
-  seed: 42                # deterministic RNG seed
+  batches: 2
+  microbatches: 4
+  seed: 42
 
 pipeline:
+  schedule: 1f1b
+  precision: bf16
+  activation_mb: 50
+  backward_factor: 2.0
   stages:
-    - id: 0
-      device: node0_gpu0
-      compute_latency: { type: normal, mean: 5.0, std: 0.5 }
-  backward_factor: 2.0    # backward = 2x forward compute time
+    - device: node0_gpu0
+      weights_mb: 2048
+      compute:
+        mode: analytical
+        tflop: 6.0
+        memory_mb: 256.0
+        efficiency:
+          compute: 0.72
+          memory: 0.85
+        jitter: { type: normal, mean: 0.0, std: 0.15 }
 
-scheduler:
-  policy: 1f1b             # "gpipe" or "1f1b", or any registered custom policy
+    - device: node1_gpu0
+      weights_mb: 3072
+      compute:
+        mode: explicit
+        distribution: { type: normal, mean: 8.0, std: 0.3 }
 
 hardware:
   devices:
-    - id: node0_gpu0
-      kind: gpu
-      memory_mb: 81920
-  links:
-    - src: node0_gpu0
-      dst: node0_gpu1
-      bandwidth_gbps: 900
-      base_latency_us: 1.0
-      jitter: { type: normal, mean: 0.0, std: 0.1 }
-  activation_size_mb: 50
+    - { id: node0_gpu0, gpu: h100, node: node0, socket: 0 }
+    - { id: node1_gpu0, gpu: a100, node: node1, socket: 0 }
+  interconnect:
+    same_node: nvlink
+    cross_node: infiniband
 
 optimizer:
   enabled: true
-  gradient_size_mb: 100
-  compute_latency: { type: normal, mean: 2.0, std: 0.3 }
+  gradient_mb: 100
+  accumulation_steps: 1
+  allreduce:
+    algorithm: naive
+  update: { type: normal, mean: 2.0, std: 0.3 }
 
 failure:
   enabled: false
-  check_interval: 10.0
-  device_fail_prob: 0.001
-  link_fail_prob: 0.0005
-  recovery_time: 5.0
+
+output:
+  timeline: output/timeline.png
+  dashboard: output/dashboard.png
+  summary_json: output/summary.json
+  trace_csv: output/trace.csv
+```
+
+### Compute modes
+
+Each stage uses exactly one compute mode:
+
+- `mode: explicit`
+  Uses a measured or assumed latency distribution directly.
+- `mode: analytical`
+  Derives latency from stage workload plus device preset capability.
+
+Analytical stages support optional remote memory placement:
+
+```yaml
+memory_placement:
+  kind: socket
+  node: node0
+  socket: 1
+```
+
+or
+
+```yaml
+memory_placement:
+  kind: device
+  device: node0_gpu1
 ```
 
 ### Latency distributions
 
-Stages and link jitter support configurable distributions:
+Stage distributions, optimizer update latency, and interconnect jitter support:
 
 - `constant` — deterministic (`{ type: constant, value: 5.0 }`)
 - `normal` — Gaussian, clamped to non-negative (`{ type: normal, mean: 5.0, std: 0.5 }`)
 - `heavy_tailed` — Pareto, for modeling stragglers (`{ type: heavy_tailed, base: 5.0, alpha: 2.5 }`)
 - `poisson` — discrete count (`{ type: poisson, lam: 5.0 }`)
+
+### Hardware presets
+
+Built-in device presets currently include:
+
+- `h100`
+- `a100`
+- `l40s`
+- `cpu-standard`
+
+Built-in interconnect presets currently include:
+
+- `nvlink`
+- `pcie`
+- `infiniband`
+- `ethernet`
+
+Use `overrides` only for advanced experiments:
+
+```yaml
+overrides:
+  devices:
+    - id: gpu0
+      memory_mb: 40960
+  links:
+    - src: gpu0
+      dst: gpu1
+      bandwidth_gbps: 300
+      latency_us: 7.0
+      jitter: { type: constant, value: 0.0 }
+```
 
 ## Custom Scheduling Policies
 
@@ -113,20 +193,24 @@ Then set `policy: my_policy` in your YAML config.
 
 HOPS reports:
 
-- **Throughput** — micro-batches per ms
+- **Throughput** — micro-batches per ms and per s
 - **End-to-end latency** — p50, p99, mean per micro-batch
 - **Bubble ratio** — fraction of device-time spent idle
-- **Per-stage utilization** — compute time / total time per stage
+- **Per-stage / per-device / per-link utilization**
 - **Communication overhead** — transfer time as a fraction of compute
+- **Transfer contention** — peak concurrency and contended-transfer fraction
 - **Optimizer step** — all-reduce time and weight update time (when enabled)
-- **Failure impact** — count and total downtime (when enabled)
+- **Failure impact** — count, total downtime, and lost-work slot
+- **Peak memory per device**
+
+Machine-readable output uses one canonical summary JSON schema and a separate raw event trace CSV.
 
 ## Visualization
 
 When run without `--no-viz`, HOPS generates:
 
 - `output/timeline.png` — Gantt chart showing per-device compute tasks (forward/backward), with failure markers
-- `output/dashboard.png` — 4-panel summary: per-stage utilization, e2e latency histogram, bubble ratio, compute vs. communication breakdown
+- `output/dashboard.png` — 8-panel summary including stage/device/link utilization, latency histogram, bubble ratio, compute vs communication, peak memory, and a key metrics panel
 
 ## Development
 
@@ -158,6 +242,7 @@ uv add --group dev <package>  # dev-only dependency
 
 ```
 src/hops/
+├── config.py            # Canonical config schema + parser/validation
 ├── core/
 │   ├── event_engine.py    # Discrete event simulation loop (priority queue)
 │   ├── pipeline.py        # Pipeline stages, micro-batches, forward/backward/optimizer dataflow
@@ -167,24 +252,29 @@ src/hops/
 ├── hardware/
 │   ├── device.py          # GPU/CPU device abstractions
 │   ├── network.py         # Communication links with bandwidth and jitter
-│   └── topology.py        # Device graph with self-link optimization
+│   └── topology.py        # Device graph with inferred locality-aware links
 ├── latency/
 │   ├── distributions.py   # Configurable latency distributions (normal, heavy-tail, Pareto, Poisson)
-│   └── compute_model.py   # Per-stage computation time modeling with backward factor
+│   └── compute_model.py   # Explicit and analytical stage latency modeling
 ├── failure/
 │   └── engine.py          # Chaos Monkey-style failure injection with automatic recovery
 ├── metrics/
-│   ├── collector.py       # Runtime statistics: compute, transfer, failure, in-flight records
-│   └── reporter.py        # Summary report with throughput, bubbles, utilization, optimizer breakdown
+│   ├── collector.py       # Raw event recording
+│   ├── analyzer.py        # Derived metrics and interval analysis
+│   ├── summary.py         # Canonical summary dataclasses
+│   ├── exporter.py        # Trace CSV serialization
+│   └── reporter.py        # Text and JSON summary output
+├── presets.py           # Built-in device and interconnect preset registry
+├── runtime.py           # Runtime assembly from validated config
 └── viz/
     ├── timeline.py        # Gantt-style timeline with failure markers
-    └── dashboard.py       # 4-panel summary dashboard
+    └── dashboard.py       # 8-panel summary dashboard
 ```
 
 | Directory | Purpose |
 |-----------|---------|
 | `configs/` | YAML experiment configurations |
-| `tests/` | pytest test suite (48 tests) |
+| `tests/` | pytest test suite |
 | `experiments/` | Experiment results |
 | `output/` | Generated visualizations |
 
@@ -192,12 +282,13 @@ src/hops/
 
 HOPS is a **discrete event simulator**. The core loop (`event_engine.py`) processes timestamped events from a priority queue. All modules plug into this loop:
 
-1. **Hardware** defines the physical topology — devices, links, and bandwidth
-2. **Pipeline** orchestrates dataflow — forward passes, backward passes, activation transfers, and optimizer steps (all-reduce + weight update)
-3. **Scheduler** decides task ordering per stage (pluggable via `register_scheduler`)
-4. **Latency** provides stochastic computation and communication delays
-5. **Failure** injects device and link faults with automatic recovery
-6. **Metrics** collects records and computes derived metrics (throughput, bubble ratio, utilization)
-7. **Viz** renders timeline and dashboard visualizations
+1. **Config + Presets** resolve the short YAML schema into concrete hardware, links, and stage models
+2. **Hardware** defines the physical topology — devices, inferred links, explicit link overrides, and locality
+3. **Pipeline** orchestrates dataflow — forward passes, backward passes, activation transfers, and optimizer steps (all-reduce + weight update)
+4. **Scheduler** decides task ordering per stage (pluggable via `register_scheduler`)
+5. **Latency** provides stochastic computation and communication delays
+6. **Failure** injects device and link faults with automatic recovery
+7. **Metrics** records raw events, derives a canonical summary, and exports JSON/CSV outputs
+8. **Viz** renders timeline and dashboard visualizations
 
 Determinism is ensured by threading an explicit `np.random.Generator` (seeded from the YAML config) through all stochastic components.
