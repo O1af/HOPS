@@ -13,6 +13,41 @@ from hops.latency.distributions import Constant
 from hops.metrics.collector import MetricsCollector
 
 
+def make_canonical_config(*, batches: int = 1, microbatches: int = 1) -> dict:
+    return {
+        "simulation": {
+            "batches": batches,
+            "microbatches": microbatches,
+            "seed": 0,
+        },
+        "pipeline": {
+            "schedule": "gpipe",
+            "precision": "fp32",
+            "activation_mb": 0.0,
+            "backward_factor": 2.0,
+            "stages": [
+                {
+                    "device": "gpu0",
+                    "weights_mb": 0.0,
+                    "compute": {
+                        "mode": "explicit",
+                        "distribution": {"type": "constant", "value": 1.0},
+                    },
+                }
+            ],
+        },
+        "hardware": {
+            "devices": [
+                {"id": "gpu0", "gpu": "a100", "node": "node0", "socket": 0}
+            ],
+            "interconnect": {"same_node": "nvlink", "cross_node": "infiniband"},
+        },
+        "optimizer": {"enabled": False},
+        "failure": {"enabled": False},
+        "output": {},
+    }
+
+
 def make_test_pipeline(scheduler: Scheduler, *, num_stages: int = 4,
                        compute_time: float = 5.0, seed: int = 42):
     """Build a simple homogeneous pipeline for testing.

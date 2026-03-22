@@ -3,6 +3,7 @@
 import numpy as np
 import pytest
 
+from hops.config import parse_config, validate_config
 from hops.core.event_engine import EventEngine
 from hops.core.pipeline import Pipeline, Stage
 from hops.core.scheduler import (
@@ -12,10 +13,17 @@ from hops.core.scheduler import (
 from hops.core.types import AllreduceAlgo, Phase, Precision
 from hops.hardware.device import Device
 from hops.hardware.network import Link
-from hops.hardware.topology import Topology
+from hops.hardware.topology import LinkProfile, Locality, LocalityPenalty, Topology
 from hops.latency.compute_model import ComputeModel
 from hops.latency.distributions import Constant
 from hops.metrics.collector import MetricsCollector
+from hops.runtime import build_runtime
+
+from .conftest import make_canonical_config
+
+
+def validate_and_parse(config: dict):
+    return parse_config(config)
 
 
 def _make_pipeline(scheduler, *, num_stages=4, compute_time=5.0, seed=42,
@@ -152,20 +160,39 @@ class TestMemory:
             assert peak > 0
 
     def test_memory_validation_passes_for_feasible_config(self):
-        from main import validate_memory
-        devices = [Device("gpu0", "gpu", 81920)]
-        topology = Topology(devices, [])
-        stage_configs = [{"id": 0, "device": "gpu0", "memory_mb": 2048}]
-        # Should not raise
-        validate_memory(topology, stage_configs, "gpipe", 8, 50.0, Precision.FP32)
+        config = make_canonical_config(batches=1, microbatches=8)
+        config["pipeline"]["activation_mb"] = 50.0
+        config["pipeline"]["stages"][0]["weights_mb"] = 2048
+        config["hardware"]["devices"][0]["gpu"] = "h100"
+        build_runtime(validate_and_parse(config))
 
     def test_memory_validation_fails_for_infeasible_config(self):
-        from main import validate_memory
-        devices = [Device("gpu0", "gpu", 100)]  # tiny GPU
-        topology = Topology(devices, [])
-        stage_configs = [{"id": 0, "device": "gpu0", "memory_mb": 2048}]
+        config = make_canonical_config(batches=1, microbatches=8)
+        config["pipeline"]["activation_mb"] = 50.0
+        config["pipeline"]["stages"][0]["weights_mb"] = 2048
+        config["overrides"] = {"devices": [{"id": "gpu0", "memory_mb": 100}]}
         with pytest.raises(ValueError, match="exceeds device capacity"):
-            validate_memory(topology, stage_configs, "gpipe", 8, 50.0, Precision.FP32)
+            build_runtime(validate_and_parse(config))
+
+    def test_memory_validation_aggregates_shared_device_usage(self):
+        config = make_canonical_config(batches=1, microbatches=4)
+        config["pipeline"]["schedule"] = "1f1b"
+        config["pipeline"]["activation_mb"] = 250.0
+        config["pipeline"]["stages"] = [
+            {
+                "device": "gpu0",
+                "weights_mb": 1200.0,
+                "compute": {"mode": "explicit", "distribution": {"type": "constant", "value": 1.0}},
+            },
+            {
+                "device": "gpu0",
+                "weights_mb": 1200.0,
+                "compute": {"mode": "explicit", "distribution": {"type": "constant", "value": 1.0}},
+            },
+        ]
+        config["overrides"] = {"devices": [{"id": "gpu0", "memory_mb": 3000}]}
+        with pytest.raises(ValueError, match="Device gpu0"):
+            build_runtime(validate_and_parse(config))
 
     def test_max_in_flight_count(self):
         assert max_in_flight_count("gpipe", 0, 4, 8) == 8
@@ -242,6 +269,35 @@ class TestOverlapAndContention:
         assert links[0].active_transfers == 1
         tm.release_transfer("a", "b")
         assert links[0].active_transfers == 0
+
+    def test_transfer_locality_penalty_scales_duration(self):
+        rng = np.random.default_rng(0)
+        topology = Topology(
+            [
+                Device("n0_gpu0", "gpu", 8192, node_id="n0", socket_id="s0"),
+                Device("n0_gpu1", "gpu", 8192, node_id="n0", socket_id="s1"),
+            ],
+            [],
+            link_profiles={
+                Locality.SAME_NODE: LinkProfile(800.0, 0.0, Constant(0.0)),
+            },
+            locality_penalties={
+                Locality.SAME_NODE: LocalityPenalty(transfer_scale=1.5),
+            },
+        )
+        compute_model = ComputeModel({})
+
+        from hops.core.timing import TimingModel
+        tm = TimingModel(topology, compute_model, rng)
+
+        start_time, end_time = tm.reserve_transfer(
+            now=0.0,
+            src_device="n0_gpu0",
+            dst_device="n0_gpu1",
+            size_mb=100.0,
+        )
+
+        assert abs((end_time - start_time) - 1.5) < 1e-9
 
 
 # ── Feature 6: Pipeline drain verification ───────────────────────────────
@@ -440,3 +496,50 @@ class TestZeroBubbleMixedPrecision:
 
         assert collector.completed_microbatches == 8
         assert pipeline.activation_size_mb == 50.0
+
+
+class TestConfigurationValidation:
+    def test_pipeline_rejects_non_contiguous_stage_ids(self):
+        rng = np.random.default_rng(0)
+        topology = Topology([Device("gpu0", "gpu", 8192)], [])
+        collector = MetricsCollector()
+        engine = EventEngine()
+
+        with pytest.raises(ValueError, match="contiguous zero-based"):
+            Pipeline(
+                [Stage(1, "gpu0")],
+                engine,
+                topology,
+                ComputeModel({1: Constant(5.0)}),
+                GPipeScheduler(),
+                collector,
+                activation_size_mb=0.0,
+                rng=rng,
+            )
+
+    def test_pipeline_rejects_missing_backward_link(self):
+        rng = np.random.default_rng(0)
+        topology = Topology(
+            [Device("gpu0", "gpu", 8192), Device("gpu1", "gpu", 8192)],
+            [Link("gpu0", "gpu1", 900, 0.0, Constant(0.0))],
+        )
+        collector = MetricsCollector()
+        engine = EventEngine()
+
+        with pytest.raises(ValueError, match="backward transfer requires a link"):
+            Pipeline(
+                [Stage(0, "gpu0"), Stage(1, "gpu1")],
+                engine,
+                topology,
+                ComputeModel({0: Constant(5.0), 1: Constant(5.0)}),
+                GPipeScheduler(),
+                collector,
+                activation_size_mb=0.0,
+                rng=rng,
+            )
+
+    def test_validate_config_rejects_missing_stage_latency_definition(self):
+        config = make_canonical_config()
+        del config["pipeline"]["stages"][0]["compute"]
+        with pytest.raises(ValueError, match="must define a compute block"):
+            validate_config(config)

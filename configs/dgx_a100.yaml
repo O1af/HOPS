@@ -1,105 +1,50 @@
-# DGX A100: 2 nodes, 8 GPUs each (16 total), 8-stage pipeline
-# NVLink intra-node (600 GB/s = 4800 Gbps), InfiniBand HDR inter-node (200 Gbps)
-# A100 80GB: 312 TFLOPS FP16
+# Preset-first 8-stage A100 example across two nodes.
 
 simulation:
-  num_microbatches: 16
-  num_batches: 2
+  batches: 2
+  microbatches: 16
   seed: 42
 
 pipeline:
+  schedule: 1f1b
   precision: fp16
+  activation_mb: 100
   backward_factor: 2.0
   stages:
-    - id: 0
-      num_layers: 6
-      memory_mb: 4096
-      device: n0_gpu0
-      compute_latency: { type: normal, mean: 8.0, std: 0.5 }
-    - id: 1
-      num_layers: 6
-      memory_mb: 4096
-      device: n0_gpu1
-      compute_latency: { type: normal, mean: 8.0, std: 0.5 }
-    - id: 2
-      num_layers: 6
-      memory_mb: 4096
-      device: n0_gpu2
-      compute_latency: { type: normal, mean: 8.0, std: 0.5 }
-    - id: 3
-      num_layers: 6
-      memory_mb: 4096
-      device: n0_gpu3
-      compute_latency: { type: normal, mean: 8.0, std: 0.5 }
-    - id: 4
-      num_layers: 6
-      memory_mb: 4096
-      device: n1_gpu0
-      compute_latency: { type: normal, mean: 8.0, std: 0.5 }
-    - id: 5
-      num_layers: 6
-      memory_mb: 4096
-      device: n1_gpu1
-      compute_latency: { type: normal, mean: 8.0, std: 0.5 }
-    - id: 6
-      num_layers: 6
-      memory_mb: 4096
-      device: n1_gpu2
-      compute_latency: { type: normal, mean: 8.0, std: 0.5 }
-    - id: 7
-      num_layers: 6
-      memory_mb: 4096
-      device: n1_gpu3
-      compute_latency: { type: normal, mean: 8.0, std: 0.5 }
-
-scheduler:
-  policy: 1f1b
+    - { device: n0_gpu0, weights_mb: 4096, compute: { mode: explicit, distribution: { type: normal, mean: 8.0, std: 0.5 } } }
+    - { device: n0_gpu1, weights_mb: 4096, compute: { mode: explicit, distribution: { type: normal, mean: 8.0, std: 0.5 } } }
+    - { device: n0_gpu2, weights_mb: 4096, compute: { mode: explicit, distribution: { type: normal, mean: 8.0, std: 0.5 } } }
+    - { device: n0_gpu3, weights_mb: 4096, compute: { mode: explicit, distribution: { type: normal, mean: 8.0, std: 0.5 } } }
+    - { device: n1_gpu0, weights_mb: 4096, compute: { mode: explicit, distribution: { type: normal, mean: 8.0, std: 0.5 } } }
+    - { device: n1_gpu1, weights_mb: 4096, compute: { mode: explicit, distribution: { type: normal, mean: 8.0, std: 0.5 } } }
+    - { device: n1_gpu2, weights_mb: 4096, compute: { mode: explicit, distribution: { type: normal, mean: 8.0, std: 0.5 } } }
+    - { device: n1_gpu3, weights_mb: 4096, compute: { mode: explicit, distribution: { type: normal, mean: 8.0, std: 0.5 } } }
 
 hardware:
   devices:
-    - { id: n0_gpu0, kind: gpu, flops: 312, memory_mb: 81920, memory_bandwidth_gbps: 2039, numa_node: 0 }
-    - { id: n0_gpu1, kind: gpu, flops: 312, memory_mb: 81920, memory_bandwidth_gbps: 2039, numa_node: 0 }
-    - { id: n0_gpu2, kind: gpu, flops: 312, memory_mb: 81920, memory_bandwidth_gbps: 2039, numa_node: 0 }
-    - { id: n0_gpu3, kind: gpu, flops: 312, memory_mb: 81920, memory_bandwidth_gbps: 2039, numa_node: 0 }
-    - { id: n1_gpu0, kind: gpu, flops: 312, memory_mb: 81920, memory_bandwidth_gbps: 2039, numa_node: 1 }
-    - { id: n1_gpu1, kind: gpu, flops: 312, memory_mb: 81920, memory_bandwidth_gbps: 2039, numa_node: 1 }
-    - { id: n1_gpu2, kind: gpu, flops: 312, memory_mb: 81920, memory_bandwidth_gbps: 2039, numa_node: 1 }
-    - { id: n1_gpu3, kind: gpu, flops: 312, memory_mb: 81920, memory_bandwidth_gbps: 2039, numa_node: 1 }
-
-  links:
-    # Intra-node NVLink: 600 GB/s = 4800 Gbps, ~1us latency
-    # Node 0 — sequential pipeline links
-    - { src: n0_gpu0, dst: n0_gpu1, bandwidth_gbps: 4800, base_latency_us: 1.0, jitter: { type: normal, mean: 0.0, std: 0.05 } }
-    - { src: n0_gpu1, dst: n0_gpu0, bandwidth_gbps: 4800, base_latency_us: 1.0, jitter: { type: normal, mean: 0.0, std: 0.05 } }
-    - { src: n0_gpu1, dst: n0_gpu2, bandwidth_gbps: 4800, base_latency_us: 1.0, jitter: { type: normal, mean: 0.0, std: 0.05 } }
-    - { src: n0_gpu2, dst: n0_gpu1, bandwidth_gbps: 4800, base_latency_us: 1.0, jitter: { type: normal, mean: 0.0, std: 0.05 } }
-    - { src: n0_gpu2, dst: n0_gpu3, bandwidth_gbps: 4800, base_latency_us: 1.0, jitter: { type: normal, mean: 0.0, std: 0.05 } }
-    - { src: n0_gpu3, dst: n0_gpu2, bandwidth_gbps: 4800, base_latency_us: 1.0, jitter: { type: normal, mean: 0.0, std: 0.05 } }
-    # Cross-node InfiniBand HDR: 200 Gbps, ~5us latency
-    - { src: n0_gpu3, dst: n1_gpu0, bandwidth_gbps: 200, base_latency_us: 5.0, jitter: { type: normal, mean: 0.0, std: 0.5 } }
-    - { src: n1_gpu0, dst: n0_gpu3, bandwidth_gbps: 200, base_latency_us: 5.0, jitter: { type: normal, mean: 0.0, std: 0.5 } }
-    # Node 1 — sequential pipeline links
-    - { src: n1_gpu0, dst: n1_gpu1, bandwidth_gbps: 4800, base_latency_us: 1.0, jitter: { type: normal, mean: 0.0, std: 0.05 } }
-    - { src: n1_gpu1, dst: n1_gpu0, bandwidth_gbps: 4800, base_latency_us: 1.0, jitter: { type: normal, mean: 0.0, std: 0.05 } }
-    - { src: n1_gpu1, dst: n1_gpu2, bandwidth_gbps: 4800, base_latency_us: 1.0, jitter: { type: normal, mean: 0.0, std: 0.05 } }
-    - { src: n1_gpu2, dst: n1_gpu1, bandwidth_gbps: 4800, base_latency_us: 1.0, jitter: { type: normal, mean: 0.0, std: 0.05 } }
-    - { src: n1_gpu2, dst: n1_gpu3, bandwidth_gbps: 4800, base_latency_us: 1.0, jitter: { type: normal, mean: 0.0, std: 0.05 } }
-    - { src: n1_gpu3, dst: n1_gpu2, bandwidth_gbps: 4800, base_latency_us: 1.0, jitter: { type: normal, mean: 0.0, std: 0.05 } }
-    # Ring closure for ring all-reduce
-    - { src: n1_gpu3, dst: n0_gpu0, bandwidth_gbps: 200, base_latency_us: 5.0, jitter: { type: normal, mean: 0.0, std: 0.5 } }
-    - { src: n0_gpu0, dst: n1_gpu3, bandwidth_gbps: 200, base_latency_us: 5.0, jitter: { type: normal, mean: 0.0, std: 0.5 } }
-
-  activation_size_mb: 100
+    - { id: n0_gpu0, gpu: a100, node: n0, socket: 0 }
+    - { id: n0_gpu1, gpu: a100, node: n0, socket: 0 }
+    - { id: n0_gpu2, gpu: a100, node: n0, socket: 1 }
+    - { id: n0_gpu3, gpu: a100, node: n0, socket: 1 }
+    - { id: n1_gpu0, gpu: a100, node: n1, socket: 0 }
+    - { id: n1_gpu1, gpu: a100, node: n1, socket: 0 }
+    - { id: n1_gpu2, gpu: a100, node: n1, socket: 1 }
+    - { id: n1_gpu3, gpu: a100, node: n1, socket: 1 }
+  interconnect:
+    same_node: nvlink
+    cross_node: infiniband
 
 optimizer:
   enabled: true
-  gradient_size_mb: 200
-  compute_latency: { type: normal, mean: 3.0, std: 0.3 }
-  allreduce_algo: ring
+  gradient_mb: 200
+  accumulation_steps: 1
+  allreduce:
+    algorithm: ring
+  update: { type: normal, mean: 3.0, std: 0.3 }
 
 failure:
   enabled: false
 
 output:
-  timeline_path: output/dgx_a100_timeline.png
-  dashboard_path: output/dgx_a100_dashboard.png
+  timeline: output/dgx_a100_timeline.png
+  dashboard: output/dgx_a100_dashboard.png

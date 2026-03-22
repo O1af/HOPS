@@ -1,68 +1,58 @@
-# Single-node 4-GPU NVLink config for quick experiments
-# Useful for testing scheduler comparisons without cross-node effects
+# Single-node 4-GPU NVLink config for quick scheduler experiments.
 
 simulation:
-  num_microbatches: 8
-  num_batches: 4
+  batches: 4
+  microbatches: 8
   seed: 42
 
 pipeline:
+  schedule: zero_bubble
+  precision: bf16
+  activation_mb: 50
   backward_factor: 2.0
   stages:
-    - id: 0
-      num_layers: 8
-      memory_mb: 3072
-      device: gpu0
-      compute_latency: { type: normal, mean: 5.0, std: 0.3 }
-    - id: 1
-      num_layers: 8
-      memory_mb: 3072
-      device: gpu1
-      compute_latency: { type: normal, mean: 5.0, std: 0.3 }
-    - id: 2
-      num_layers: 8
-      memory_mb: 3072
-      device: gpu2
-      compute_latency: { type: normal, mean: 5.0, std: 0.3 }
-    - id: 3
-      num_layers: 8
-      memory_mb: 3072
-      device: gpu3
-      compute_latency: { type: normal, mean: 5.0, std: 0.3 }
-
-scheduler:
-  policy: zero_bubble
+    - device: gpu0
+      weights_mb: 3072
+      compute:
+        mode: explicit
+        distribution: { type: normal, mean: 5.0, std: 0.3 }
+    - device: gpu1
+      weights_mb: 3072
+      compute:
+        mode: explicit
+        distribution: { type: normal, mean: 5.0, std: 0.3 }
+    - device: gpu2
+      weights_mb: 3072
+      compute:
+        mode: explicit
+        distribution: { type: normal, mean: 5.0, std: 0.3 }
+    - device: gpu3
+      weights_mb: 3072
+      compute:
+        mode: explicit
+        distribution: { type: normal, mean: 5.0, std: 0.3 }
 
 hardware:
   devices:
-    - { id: gpu0, kind: gpu, flops: 312, memory_mb: 81920, memory_bandwidth_gbps: 2039, numa_node: 0 }
-    - { id: gpu1, kind: gpu, flops: 312, memory_mb: 81920, memory_bandwidth_gbps: 2039, numa_node: 0 }
-    - { id: gpu2, kind: gpu, flops: 312, memory_mb: 81920, memory_bandwidth_gbps: 2039, numa_node: 0 }
-    - { id: gpu3, kind: gpu, flops: 312, memory_mb: 81920, memory_bandwidth_gbps: 2039, numa_node: 0 }
-
-  links:
-    # NVLink all adjacent pairs (pipeline order) + ring closure
-    - { src: gpu0, dst: gpu1, bandwidth_gbps: 4800, base_latency_us: 1.0, jitter: { type: normal, mean: 0.0, std: 0.05 } }
-    - { src: gpu1, dst: gpu0, bandwidth_gbps: 4800, base_latency_us: 1.0, jitter: { type: normal, mean: 0.0, std: 0.05 } }
-    - { src: gpu1, dst: gpu2, bandwidth_gbps: 4800, base_latency_us: 1.0, jitter: { type: normal, mean: 0.0, std: 0.05 } }
-    - { src: gpu2, dst: gpu1, bandwidth_gbps: 4800, base_latency_us: 1.0, jitter: { type: normal, mean: 0.0, std: 0.05 } }
-    - { src: gpu2, dst: gpu3, bandwidth_gbps: 4800, base_latency_us: 1.0, jitter: { type: normal, mean: 0.0, std: 0.05 } }
-    - { src: gpu3, dst: gpu2, bandwidth_gbps: 4800, base_latency_us: 1.0, jitter: { type: normal, mean: 0.0, std: 0.05 } }
-    # Ring closure for ring all-reduce
-    - { src: gpu3, dst: gpu0, bandwidth_gbps: 4800, base_latency_us: 1.0, jitter: { type: normal, mean: 0.0, std: 0.05 } }
-    - { src: gpu0, dst: gpu3, bandwidth_gbps: 4800, base_latency_us: 1.0, jitter: { type: normal, mean: 0.0, std: 0.05 } }
-
-  activation_size_mb: 50
+    - { id: gpu0, gpu: a100, node: node0, socket: 0 }
+    - { id: gpu1, gpu: a100, node: node0, socket: 0 }
+    - { id: gpu2, gpu: a100, node: node0, socket: 1 }
+    - { id: gpu3, gpu: a100, node: node0, socket: 1 }
+  interconnect:
+    same_node: nvlink
+    cross_node: infiniband
 
 optimizer:
   enabled: true
-  gradient_size_mb: 100
-  compute_latency: { type: normal, mean: 2.0, std: 0.3 }
-  allreduce_algo: ring
+  gradient_mb: 100
+  accumulation_steps: 1
+  allreduce:
+    algorithm: ring
+  update: { type: normal, mean: 2.0, std: 0.3 }
 
 failure:
   enabled: false
 
 output:
-  timeline_path: output/single_node_timeline.png
-  dashboard_path: output/single_node_dashboard.png
+  timeline: output/single_node_timeline.png
+  dashboard: output/single_node_dashboard.png

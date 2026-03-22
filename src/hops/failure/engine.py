@@ -1,7 +1,10 @@
 """Chaos Monkey-style failure injection engine."""
 
+from __future__ import annotations
+
 import numpy as np
 
+from hops.config import FailureConfig
 from hops.core.event_engine import EventEngine
 from hops.core.types import Event, EventKind
 from hops.hardware.topology import Topology
@@ -12,16 +15,16 @@ class FailureEngine:
     """Periodically checks for and injects device/link failures."""
 
     def __init__(self, engine: EventEngine, topology: Topology,
-                 collector: MetricsCollector, config: dict,
+                 collector: MetricsCollector, config: FailureConfig,
                  rng: np.random.Generator):
         self.engine = engine
         self.topology = topology
         self.collector = collector
         self.rng = rng
-        self.check_interval = config.get("check_interval", 10.0)
-        self.device_fail_prob = config.get("device_fail_prob", 0.001)
-        self.link_fail_prob = config.get("link_fail_prob", 0.0005)
-        self.recovery_time = config.get("recovery_time", 5.0)
+        self.check_interval = config.check_interval_ms
+        self.device_fail_prob = config.device_failure_probability
+        self.link_fail_prob = config.link_failure_probability
+        self.recovery_time = config.recovery_time_ms
         self._failed_devices: set[str] = set()
         self._failed_links: set[tuple[str, str]] = set()
         self._device_recovery_times: dict[str, float] = {}
