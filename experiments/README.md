@@ -74,6 +74,28 @@ Each `run.slurm` creates:
 - `output/<job_id>/node_inventory.txt`
 - one or more Megatron logs
 
+## Plan
+
+Proceed in two phases: first replay reality, then infer from it.
+
+1. Run the two baseline scenarios first.
+   Start with `01_h100_baseline_pp2` and `02_a100_baseline_pp2` to measure clean H100-only and A100-only stage behavior.
+
+2. Measure communication separately.
+   Use `link_bench.py` to collect point-to-point and all-reduce timings for the tensor sizes that matter to your pipeline.
+
+3. Keep the first pass in `explicit` mode.
+   In this phase, HOPS is validating scheduling, topology, and heterogeneous imbalance while replaying measured stage times rather than trying to infer them.
+
+4. Run the heterogeneous pair.
+   Compare `03_hetero_even_pp4` against `04_hetero_weighted_pp4` and check whether the real cluster and HOPS agree on ranking, bottleneck stages, and the approximate gain from weighting the H100 stages more heavily.
+
+5. Replace placeholders with measurements.
+   Update the stage distributions in each `hops.yaml` from the Megatron logs, and update `overrides.links` from the communication benchmark.
+
+6. Move to `analytical` mode only after the explicit replay is credible.
+   The long-term goal is not to avoid measurement entirely, but to measure enough once that HOPS can predict new heterogeneous layouts with useful accuracy.
+
 ## Recommended Next Step After The First Pass
 
 After the first baseline runs, replace the placeholder explicit stage distributions in the `hops.yaml` files with measured means and standard deviations from the Megatron logs. Then rerun the heterogeneous scenarios and compare ranking and error.
