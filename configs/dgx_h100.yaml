@@ -1,0 +1,50 @@
+# Preset-first 8-stage H100 example across two nodes.
+
+simulation:
+  batches: 2
+  microbatches: 16
+  seed: 42
+
+pipeline:
+  schedule: zero_bubble
+  precision: bf16
+  activation_mb: 80
+  backward_factor: 2.0
+  stages:
+    - { device: n0_gpu0, weights_mb: 5120, compute: { mode: explicit, distribution: { type: normal, mean: 4.0, std: 0.3 } } }
+    - { device: n0_gpu1, weights_mb: 5120, compute: { mode: explicit, distribution: { type: normal, mean: 4.0, std: 0.3 } } }
+    - { device: n0_gpu2, weights_mb: 5120, compute: { mode: explicit, distribution: { type: normal, mean: 4.0, std: 0.3 } } }
+    - { device: n0_gpu3, weights_mb: 5120, compute: { mode: explicit, distribution: { type: normal, mean: 4.0, std: 0.3 } } }
+    - { device: n1_gpu0, weights_mb: 5120, compute: { mode: explicit, distribution: { type: normal, mean: 4.0, std: 0.3 } } }
+    - { device: n1_gpu1, weights_mb: 5120, compute: { mode: explicit, distribution: { type: normal, mean: 4.0, std: 0.3 } } }
+    - { device: n1_gpu2, weights_mb: 5120, compute: { mode: explicit, distribution: { type: normal, mean: 4.0, std: 0.3 } } }
+    - { device: n1_gpu3, weights_mb: 5120, compute: { mode: explicit, distribution: { type: normal, mean: 4.0, std: 0.3 } } }
+
+hardware:
+  devices:
+    - { id: n0_gpu0, gpu: h100, node: n0, socket: 0 }
+    - { id: n0_gpu1, gpu: h100, node: n0, socket: 0 }
+    - { id: n0_gpu2, gpu: h100, node: n0, socket: 1 }
+    - { id: n0_gpu3, gpu: h100, node: n0, socket: 1 }
+    - { id: n1_gpu0, gpu: h100, node: n1, socket: 0 }
+    - { id: n1_gpu1, gpu: h100, node: n1, socket: 0 }
+    - { id: n1_gpu2, gpu: h100, node: n1, socket: 1 }
+    - { id: n1_gpu3, gpu: h100, node: n1, socket: 1 }
+  interconnect:
+    same_node: nvlink
+    cross_node: infiniband
+
+optimizer:
+  enabled: true
+  gradient_mb: 160
+  accumulation_steps: 1
+  allreduce:
+    algorithm: ring
+  update: { type: normal, mean: 1.5, std: 0.2 }
+
+failure:
+  enabled: false
+
+output:
+  timeline: output/dgx_h100_timeline.png
+  dashboard: output/dgx_h100_dashboard.png

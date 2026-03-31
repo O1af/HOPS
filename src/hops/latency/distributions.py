@@ -13,7 +13,7 @@ class Distribution(ABC):
     """Base class for latency distributions."""
 
     @abstractmethod
-    def sample(self) -> float:
+    def sample(self, rng: np.random.Generator) -> float:
         """Return a non-negative random sample."""
 
     @classmethod
@@ -38,7 +38,7 @@ class Constant(Distribution):
     def __init__(self, value: float):
         self.value = value
 
-    def sample(self) -> float:
+    def sample(self, rng: np.random.Generator) -> float:
         return self.value
 
 
@@ -47,8 +47,8 @@ class Normal(Distribution):
         self.mean = mean
         self.std = std
 
-    def sample(self) -> float:
-        return max(0.0, np.random.normal(self.mean, self.std))
+    def sample(self, rng: np.random.Generator) -> float:
+        return max(0.0, rng.normal(self.mean, self.std))
 
 
 class HeavyTailed(Distribution):
@@ -58,13 +58,13 @@ class HeavyTailed(Distribution):
         self.base = base
         self.alpha = alpha
 
-    def sample(self) -> float:
-        return self.base * np.random.pareto(self.alpha)
+    def sample(self, rng: np.random.Generator) -> float:
+        return self.base * (1.0 + rng.pareto(self.alpha))
 
 
 class Poisson(Distribution):
     def __init__(self, lam: float):
         self.lam = lam
 
-    def sample(self) -> float:
-        return float(np.random.poisson(self.lam))
+    def sample(self, rng: np.random.Generator) -> float:
+        return float(rng.poisson(self.lam))

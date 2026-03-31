@@ -1,0 +1,50 @@
+# Preset-first 8-stage A100 example across two nodes.
+
+simulation:
+  batches: 2
+  microbatches: 16
+  seed: 42
+
+pipeline:
+  schedule: 1f1b
+  precision: fp16
+  activation_mb: 100
+  backward_factor: 2.0
+  stages:
+    - { device: n0_gpu0, weights_mb: 4096, compute: { mode: explicit, distribution: { type: normal, mean: 8.0, std: 0.5 } } }
+    - { device: n0_gpu1, weights_mb: 4096, compute: { mode: explicit, distribution: { type: normal, mean: 8.0, std: 0.5 } } }
+    - { device: n0_gpu2, weights_mb: 4096, compute: { mode: explicit, distribution: { type: normal, mean: 8.0, std: 0.5 } } }
+    - { device: n0_gpu3, weights_mb: 4096, compute: { mode: explicit, distribution: { type: normal, mean: 8.0, std: 0.5 } } }
+    - { device: n1_gpu0, weights_mb: 4096, compute: { mode: explicit, distribution: { type: normal, mean: 8.0, std: 0.5 } } }
+    - { device: n1_gpu1, weights_mb: 4096, compute: { mode: explicit, distribution: { type: normal, mean: 8.0, std: 0.5 } } }
+    - { device: n1_gpu2, weights_mb: 4096, compute: { mode: explicit, distribution: { type: normal, mean: 8.0, std: 0.5 } } }
+    - { device: n1_gpu3, weights_mb: 4096, compute: { mode: explicit, distribution: { type: normal, mean: 8.0, std: 0.5 } } }
+
+hardware:
+  devices:
+    - { id: n0_gpu0, gpu: a100, node: n0, socket: 0 }
+    - { id: n0_gpu1, gpu: a100, node: n0, socket: 0 }
+    - { id: n0_gpu2, gpu: a100, node: n0, socket: 1 }
+    - { id: n0_gpu3, gpu: a100, node: n0, socket: 1 }
+    - { id: n1_gpu0, gpu: a100, node: n1, socket: 0 }
+    - { id: n1_gpu1, gpu: a100, node: n1, socket: 0 }
+    - { id: n1_gpu2, gpu: a100, node: n1, socket: 1 }
+    - { id: n1_gpu3, gpu: a100, node: n1, socket: 1 }
+  interconnect:
+    same_node: nvlink
+    cross_node: infiniband
+
+optimizer:
+  enabled: true
+  gradient_mb: 200
+  accumulation_steps: 1
+  allreduce:
+    algorithm: ring
+  update: { type: normal, mean: 3.0, std: 0.3 }
+
+failure:
+  enabled: false
+
+output:
+  timeline: output/dgx_a100_timeline.png
+  dashboard: output/dgx_a100_dashboard.png

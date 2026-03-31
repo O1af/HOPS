@@ -12,6 +12,9 @@ from hops.metrics.collector import MetricsCollector
 COLORS = {
     Phase.FORWARD: "#4C9BE8",
     Phase.BACKWARD: "#E8804C",
+    Phase.BACKWARD_B: "#E8804C",   # activation gradient — same hue as backward
+    Phase.BACKWARD_W: "#D4A843",   # weight gradient — distinct gold
+    Phase.OPTIMIZER: "#6BC86B",
 }
 
 
@@ -40,8 +43,8 @@ def draw_timeline(collector: MetricsCollector, output_path: str) -> None:
         color = COLORS[r.phase]
         ax.barh(y, width, left=r.start_time, height=0.6, color=color,
                 edgecolor="white", linewidth=0.5)
-        # Label with microbatch id
-        if width > 0.5:
+        # Label with microbatch id (skip for optimizer records)
+        if width > 0.5 and r.microbatch_id is not None:
             ax.text(r.start_time + width / 2, y, str(r.microbatch_id),
                     ha="center", va="center", fontsize=7, color="white")
 
@@ -52,12 +55,24 @@ def draw_timeline(collector: MetricsCollector, output_path: str) -> None:
 
     ax.set_yticks(range(len(devices)))
     ax.set_yticklabels(devices)
+    ax.invert_yaxis()
     ax.set_xlabel("Time (ms)")
     ax.set_title("Pipeline Timeline")
-    ax.legend(handles=[
-        mpatches.Patch(color=COLORS[Phase.FORWARD], label="Forward"),
-        mpatches.Patch(color=COLORS[Phase.BACKWARD], label="Backward"),
-    ], loc="upper right")
+
+    # Build legend from phases actually present
+    present_phases = {r.phase for r in collector.computes}
+    legend_items = [
+        (Phase.FORWARD, "Forward"),
+        (Phase.BACKWARD, "Backward"),
+        (Phase.BACKWARD_B, "Backward-B"),
+        (Phase.BACKWARD_W, "Backward-W"),
+        (Phase.OPTIMIZER, "Optimizer"),
+    ]
+    ax.legend(
+        handles=[mpatches.Patch(color=COLORS[p], label=label)
+                 for p, label in legend_items if p in present_phases],
+        loc="upper right",
+    )
     plt.tight_layout()
     plt.savefig(output_path, dpi=150)
     plt.close()

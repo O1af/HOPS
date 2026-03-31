@@ -1,26 +1,137 @@
 """Per-stage computation time modeling."""
 
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Protocol
+
+import numpy as np
+
+from hops.config import PipelineConfig, StageConfig
 from hops.core.types import Phase
-from hops.latency.distributions import Distribution
+from hops.hardware.topology import Topology
+from hops.latency.distributions import Constant, Distribution
+
+
+class StageLatencySource(Protocol):
+    def sample(self, rng: np.random.Generator) -> float:
+        """Return a forward-pass latency sample in milliseconds."""
+
+
+@dataclass
+class DistributionLatency:
+    distribution: Distribution
+    scale: float = 1.0
+    offset_ms: float = 0.0
+
+    def sample(self, rng: np.random.Generator) -> float:
+        return max(0.0, self.distribution.sample(rng) * self.scale + self.offset_ms)
+
+
+@dataclass
+class DerivedLatency:
+    workload_tflop: float
+    device_flops: float
+    memory_access_mb: float
+    memory_bandwidth_gbps: float
+    efficiency: float = 1.0
+    memory_efficiency: float = 1.0
+    compute_scale: float = 1.0
+    memory_bandwidth_scale: float = 1.0
+    memory_latency_us: float = 0.0
+    latency_scale: float = 1.0
+    jitter: Distribution = Constant(0.0)
+
+    def sample(self, rng: np.random.Generator) -> float:
+        effective_flops = self.device_flops * self.efficiency
+        compute_ms = 1000.0 * self.workload_tflop / effective_flops
+        compute_ms *= self.compute_scale
+
+        memory_ms = 0.0
+        if self.memory_access_mb > 0:
+            effective_bw = (
+                self.memory_bandwidth_gbps
+                * self.memory_efficiency
+                * self.memory_bandwidth_scale
+            )
+            memory_ms = (self.memory_access_mb * 8.0) / effective_bw
+            memory_ms += self.memory_latency_us / 1000.0
+
+        base_ms = (compute_ms + memory_ms) * self.latency_scale
+        return max(0.0, base_ms + self.jitter.sample(rng))
 
 
 class ComputeModel:
-    """Maps each pipeline stage to a latency distribution."""
+    """Maps each pipeline stage to a latency model."""
 
-    def __init__(self, stage_distributions: dict[int, Distribution],
-                 backward_factor: float = 2.0):
-        self._dists = stage_distributions
+    def __init__(self, stage_models: dict[int, StageLatencySource],
+                 backward_factor: float = 2.0,
+                 backward_b_fraction: float = 0.5,
+                 precision_speedup: float = 1.0):
+        self._models = stage_models
         self._backward_factor = backward_factor
+        self._backward_b_fraction = backward_b_fraction
+        self._precision_speedup = precision_speedup
 
-    def sample(self, stage_id: int, phase: Phase) -> float:
-        base = self._dists[stage_id].sample()
+    def sample(self, stage_id: int, phase: Phase, rng: np.random.Generator) -> float:
+        base = self._models[stage_id].sample(rng)
         if phase == Phase.BACKWARD:
             base *= self._backward_factor
+        elif phase == Phase.BACKWARD_B:
+            base *= self._backward_factor * self._backward_b_fraction
+        elif phase == Phase.BACKWARD_W:
+            base *= self._backward_factor * (1.0 - self._backward_b_fraction)
+        if self._precision_speedup != 1.0:
+            base /= self._precision_speedup
         return base
 
+    @staticmethod
+    def _stage_model_from_config(stage: StageConfig, topology: Topology) -> StageLatencySource:
+        penalty = topology.stage_locality_penalty(
+            device_id=stage.device,
+            memory_placement=stage.memory_placement,
+        )
+        if stage.compute_mode == "explicit":
+            assert stage.explicit is not None
+            return DistributionLatency(Distribution.from_yaml(stage.explicit.distribution))
+
+        assert stage.analytical is not None
+        device = topology.device(stage.device)
+        if device.flops is None or device.flops <= 0:
+            raise ValueError(
+                f"Stage {stage.id} uses analytical compute but device {device.id!r} "
+                "does not define a positive flops value"
+            )
+        memory_bandwidth = device.memory_bandwidth_gbps
+        if stage.analytical.memory_mb > 0 and (memory_bandwidth is None or memory_bandwidth <= 0):
+            raise ValueError(
+                f"Stage {stage.id} uses analytical memory access but device {device.id!r} "
+                "does not define a positive memory bandwidth value"
+            )
+
+        return DerivedLatency(
+            workload_tflop=stage.analytical.tflop,
+            device_flops=device.flops,
+            memory_access_mb=stage.analytical.memory_mb,
+            memory_bandwidth_gbps=memory_bandwidth or float("inf"),
+            efficiency=stage.analytical.efficiency_compute,
+            memory_efficiency=stage.analytical.efficiency_memory,
+            compute_scale=penalty.compute_scale,
+            memory_bandwidth_scale=penalty.memory_bandwidth_scale,
+            memory_latency_us=penalty.memory_latency_us,
+            latency_scale=1.0,
+            jitter=Distribution.from_yaml(stage.analytical.jitter),
+        )
+
     @classmethod
-    def from_yaml(cls, config: dict) -> "ComputeModel":
-        dists = {}
-        for stage_cfg in config["stages"]:
-            dists[stage_cfg["id"]] = Distribution.from_yaml(stage_cfg["compute_latency"])
-        return cls(dists, config.get("backward_factor", 2.0))
+    def from_pipeline_config(cls, pipeline: PipelineConfig,
+                             topology: Topology) -> "ComputeModel":
+        stage_models: dict[int, StageLatencySource] = {}
+        for stage in pipeline.stages:
+            stage_models[stage.id] = cls._stage_model_from_config(stage, topology)
+        return cls(
+            stage_models,
+            backward_factor=pipeline.backward_factor,
+            backward_b_fraction=pipeline.backward_split.activation_grad_fraction,
+            precision_speedup=pipeline.precision.compute_speedup,
+        )

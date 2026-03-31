@@ -1,0 +1,58 @@
+# Single-node 4-GPU NVLink config for quick scheduler experiments.
+
+simulation:
+  batches: 4
+  microbatches: 8
+  seed: 42
+
+pipeline:
+  schedule: zero_bubble
+  precision: bf16
+  activation_mb: 50
+  backward_factor: 2.0
+  stages:
+    - device: gpu0
+      weights_mb: 3072
+      compute:
+        mode: explicit
+        distribution: { type: normal, mean: 5.0, std: 0.3 }
+    - device: gpu1
+      weights_mb: 3072
+      compute:
+        mode: explicit
+        distribution: { type: normal, mean: 5.0, std: 0.3 }
+    - device: gpu2
+      weights_mb: 3072
+      compute:
+        mode: explicit
+        distribution: { type: normal, mean: 5.0, std: 0.3 }
+    - device: gpu3
+      weights_mb: 3072
+      compute:
+        mode: explicit
+        distribution: { type: normal, mean: 5.0, std: 0.3 }
+
+hardware:
+  devices:
+    - { id: gpu0, gpu: a100, node: node0, socket: 0 }
+    - { id: gpu1, gpu: a100, node: node0, socket: 0 }
+    - { id: gpu2, gpu: a100, node: node0, socket: 1 }
+    - { id: gpu3, gpu: a100, node: node0, socket: 1 }
+  interconnect:
+    same_node: nvlink
+    cross_node: infiniband
+
+optimizer:
+  enabled: true
+  gradient_mb: 100
+  accumulation_steps: 1
+  allreduce:
+    algorithm: ring
+  update: { type: normal, mean: 2.0, std: 0.3 }
+
+failure:
+  enabled: false
+
+output:
+  timeline: output/single_node_timeline.png
+  dashboard: output/single_node_dashboard.png

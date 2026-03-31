@@ -1,105 +1,81 @@
 # HOPS default configuration
-# 4-stage heterogeneous pipeline: 2 fast GPUs + 2 slower GPUs
+# Two-node heterogeneous example: two fast GPUs on node0, two slower GPUs on node1.
 
 simulation:
-  num_microbatches: 8
-  num_batches: 4
+  batches: 2
+  microbatches: 8
   seed: 42
 
 pipeline:
+  schedule: 1f1b
+  precision: bf16
+  activation_mb: 50
+  backward_factor: 2.0
   stages:
-    - id: 0
-      num_layers: 4
-      memory_mb: 2048
-      device: node0_gpu0
-      compute_latency: { type: normal, mean: 5.0, std: 0.5 }
-    - id: 1
-      num_layers: 4
-      memory_mb: 2048
-      device: node0_gpu1
-      compute_latency: { type: normal, mean: 5.0, std: 0.5 }
-    - id: 2
-      num_layers: 4
-      memory_mb: 3072
-      device: node1_gpu0
-      compute_latency: { type: normal, mean: 6.0, std: 0.8 }
-    - id: 3
-      num_layers: 4
-      memory_mb: 3072
-      device: node1_gpu1
-      compute_latency: { type: heavy_tailed, base: 6.0, alpha: 2.5 }
-
-scheduler:
-  policy: 1f1b
+    - device: node0_gpu0
+      weights_mb: 1792
+      compute:
+        mode: analytical
+        tflop: 5.0
+        memory_mb: 224.0
+        efficiency:
+          compute: 0.76
+          memory: 0.88
+        jitter: { type: normal, mean: 0.0, std: 0.10 }
+    - device: node0_gpu1
+      weights_mb: 1792
+      compute:
+        mode: analytical
+        tflop: 5.0
+        memory_mb: 224.0
+        efficiency:
+          compute: 0.76
+          memory: 0.88
+        jitter: { type: normal, mean: 0.0, std: 0.10 }
+    - device: node1_gpu0
+      weights_mb: 3072
+      compute:
+        mode: analytical
+        tflop: 9.0
+        memory_mb: 320.0
+        efficiency:
+          compute: 0.66
+          memory: 0.78
+        jitter: { type: normal, mean: 0.0, std: 0.18 }
+    - device: node1_gpu1
+      weights_mb: 3072
+      compute:
+        mode: analytical
+        tflop: 9.0
+        memory_mb: 320.0
+        efficiency:
+          compute: 0.66
+          memory: 0.78
+        jitter: { type: normal, mean: 0.0, std: 0.18 }
 
 hardware:
   devices:
-    - id: node0_gpu0
-      kind: gpu
-      flops: 312
-      memory_mb: 81920
-      memory_bandwidth_gbps: 3350
-      numa_node: 0
-    - id: node0_gpu1
-      kind: gpu
-      flops: 312
-      memory_mb: 81920
-      memory_bandwidth_gbps: 3350
-      numa_node: 0
-    - id: node1_gpu0
-      kind: gpu
-      flops: 200
-      memory_mb: 49152
-      memory_bandwidth_gbps: 2000
-      numa_node: 1
-    - id: node1_gpu1
-      kind: gpu
-      flops: 200
-      memory_mb: 49152
-      memory_bandwidth_gbps: 2000
-      numa_node: 1
-  links:
-    - src: node0_gpu0
-      dst: node0_gpu1
-      bandwidth_gbps: 900
-      base_latency_us: 1.0
-      jitter: { type: normal, mean: 0.0, std: 0.1 }
-    - src: node0_gpu1
-      dst: node1_gpu0
-      bandwidth_gbps: 100
-      base_latency_us: 5.0
-      jitter: { type: normal, mean: 0.0, std: 1.0 }
-    - src: node1_gpu0
-      dst: node1_gpu1
-      bandwidth_gbps: 900
-      base_latency_us: 1.0
-      jitter: { type: normal, mean: 0.0, std: 0.1 }
-    # Reverse links for backward pass
-    - src: node1_gpu1
-      dst: node1_gpu0
-      bandwidth_gbps: 900
-      base_latency_us: 1.0
-      jitter: { type: normal, mean: 0.0, std: 0.1 }
-    - src: node1_gpu0
-      dst: node0_gpu1
-      bandwidth_gbps: 100
-      base_latency_us: 5.0
-      jitter: { type: normal, mean: 0.0, std: 1.0 }
-    - src: node0_gpu1
-      dst: node0_gpu0
-      bandwidth_gbps: 900
-      base_latency_us: 1.0
-      jitter: { type: normal, mean: 0.0, std: 0.1 }
-  activation_size_mb: 50
+    - { id: node0_gpu0, gpu: h100, node: node0, socket: 0 }
+    - { id: node0_gpu1, gpu: h100, node: node0, socket: 1 }
+    - { id: node1_gpu0, gpu: a100, node: node1, socket: 0 }
+    - { id: node1_gpu1, gpu: a100, node: node1, socket: 1 }
+  interconnect:
+    same_node: nvlink
+    cross_node: infiniband
+
+optimizer:
+  enabled: true
+  gradient_mb: 100
+  accumulation_steps: 1
+  allreduce:
+    algorithm: naive
+  update: { type: normal, mean: 2.0, std: 0.3 }
 
 failure:
   enabled: false
-  check_interval: 10.0
-  device_fail_prob: 0.001
-  link_fail_prob: 0.0005
-  recovery_strategy: restart
-  recovery_time: 5.0
 
 output:
-  timeline_path: output/timeline.png
-  dashboard_path: output/dashboard.png
+  timeline: output/timeline.png
+  dashboard: output/dashboard.png
+  summary_json: output/summary.json
+  trace_csv: output/trace.csv
