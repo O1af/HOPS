@@ -1,0 +1,30 @@
+aws configure
+
+pcluster start
+
+pcluster list-clusters
+
+pcluster delete-cluster -n megatron-test -r us-east-1
+
+pcluster create-cluster \
+  --cluster-name megatron-test \
+  --cluster-configuration cluster.yaml \
+  -r us-east-1
+
+pcluster get-cluster-stack-events \
+  -n megatron-test \
+  -r us-east-1 > log.txt
+
+aws ec2 describe-subnets \
+  --query 'Subnets[*].[SubnetId,MapPublicIpOnLaunch]' \
+  --output table                        
+
+aws ec2 create-key-pair \
+  --key-name megatron-key2 \
+  --key-type ed25519 \
+  --query 'KeyMaterial' \
+  --output text > ~/.ssh/megatron-key2.pem
+
+chmod 400 megatron-key.pem
+
+aws sts get-caller-identity

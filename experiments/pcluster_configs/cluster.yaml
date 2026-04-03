@@ -1,0 +1,34 @@
+Region: us-east-1
+
+Image:
+  Os: ubuntu2204
+
+HeadNode:
+  InstanceType: c6i.large
+  Ssh:
+    KeyName: megatron-key
+  Networking:
+    SubnetId: subnet-0daedcb84de82bc78
+
+Scheduling:
+  Scheduler: slurm
+  SlurmQueues:
+    - Name: fast-gpu
+      Networking:
+        SubnetIds:
+          - subnet-044d187e65ce52d9a
+      ComputeResources:
+        - Name: p5
+          InstanceType: p5.48xlarge
+          MinCount: 0
+          MaxCount: 2
+
+    - Name: slow-gpu
+      Networking:
+        SubnetIds:
+          - subnet-044d187e65ce52d9a
+      ComputeResources:
+        - Name: g5
+          InstanceType: g5.48xlarge
+          MinCount: 0
+          MaxCount: 2
