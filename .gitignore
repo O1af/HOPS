@@ -23,3 +23,5 @@ output/
 
 # pytest
 .pytest_cache/
+
+megatron-key.pem

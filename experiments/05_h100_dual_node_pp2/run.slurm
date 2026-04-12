@@ -14,8 +14,8 @@
 
 set -euo pipefail
 
-SCENARIO_DIR=$(cd "$(dirname "$0")" && pwd)
-REPO_DIR=$(cd "$SCENARIO_DIR/../.." && pwd)
+REPO_DIR=$(cd "${SLURM_SUBMIT_DIR:-$(pwd)}" && pwd)
+SCENARIO_DIR="$REPO_DIR/experiments/05_h100_dual_node_pp2"
 OUTPUT_DIR="$SCENARIO_DIR/output/${SLURM_JOB_ID:-manual}"
 mkdir -p "$OUTPUT_DIR"
 
