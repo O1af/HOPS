@@ -24,6 +24,11 @@ These assets are designed for a small ParallelCluster validation campaign where:
    Mixed H100+A100 run using 2 GPUs from each node and `PP=4`.
    Purpose: measure whether giving more layers to the H100 stages improves throughput.
 
+5. `05_h100_dual_node_pp2`
+   Two-node H100 baseline using 1 GPU per node and `PP=2`.
+   Purpose: validate HOPS against a capacity-constrained H100 setup such as `2 x p5.4xlarge`,
+   where each stage runs on a different node and all pipeline communication is cross-node.
+
 ## Files
 
 - `link_bench.py`
@@ -62,6 +67,12 @@ sbatch experiments/03_hetero_even_pp4/run.slurm
 sbatch experiments/04_hetero_weighted_pp4/run.slurm
 ```
 
+Two-node H100 baseline:
+
+```bash
+sbatch experiments/05_h100_dual_node_pp2/run.slurm
+```
+
 If your cluster does not expose both node types from one partition, keep the inner `torchrun` logic from the heterogeneous scripts but translate the allocation to your site-specific Slurm constraints.
 
 ## Outputs
@@ -80,6 +91,10 @@ Proceed in two phases: first replay reality, then infer from it.
 
 1. Run the two baseline scenarios first.
    Start with `01_h100_baseline_pp2` and `02_a100_baseline_pp2` to measure clean H100-only and A100-only stage behavior.
+
+   If the available cluster shape is instead `2 x p5.4xlarge` (one H100 GPU per node),
+   use `05_h100_dual_node_pp2` as the H100 baseline and interpret it as a cross-node PP=2
+   reference rather than a same-node NVLink baseline.
 
 2. Measure communication separately.
    Use `link_bench.py` to collect point-to-point and all-reduce timings for the tensor sizes that matter to your pipeline.

@@ -1,0 +1,41 @@
+# Initial calibration template for a 2-stage H100-only pipeline across 2 nodes.
+# This matches a cluster shape with one H100 GPU per node (for example 2 x p5.4xlarge).
+# Replace the explicit distribution means/std values after collecting real logs.
+
+simulation:
+  batches: 4
+  microbatches: 8
+  seed: 42
+
+pipeline:
+  schedule: 1f1b
+  precision: bf16
+  activation_mb: 64
+  backward_factor: 2.0
+  stages:
+    - device: h100_node0_gpu0
+      weights_mb: 4096
+      compute:
+        mode: explicit
+        distribution: { type: normal, mean: 22.0, std: 1.5 }
+    - device: h100_node1_gpu0
+      weights_mb: 4096
+      compute:
+        mode: explicit
+        distribution: { type: normal, mean: 22.0, std: 1.5 }
+
+hardware:
+  devices:
+    - { id: h100_node0_gpu0, gpu: h100, node: h100_node0, socket: 0 }
+    - { id: h100_node1_gpu0, gpu: h100, node: h100_node1, socket: 0 }
+  interconnect:
+    same_node: nvlink
+    cross_node: infiniband
+
+optimizer:
+  enabled: false
+
+failure:
+  enabled: false
+
+output: {}

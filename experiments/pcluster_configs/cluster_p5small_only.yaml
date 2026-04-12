@@ -1,0 +1,33 @@
+# Max cluster footprint at queue max:
+# - Head node: 1 x c6i.large = 2 vCPUs, no GPU
+# - fast-gpu: 2 x p5.4xlarge = 2 H100, 32 vCPUs total
+# - Max cluster total = 2 H100, 34 vCPUs including head
+Region: us-east-1
+
+Image:
+  Os: ubuntu2204
+
+HeadNode:
+  # Head node only: c6i.large = 2 vCPUs, no GPU
+  InstanceType: c6i.large
+  Ssh:
+    KeyName: megatron-key
+  Networking:
+    # Public subnet in us-east-1a
+    SubnetId: subnet-0daedcb84de82bc78
+
+Scheduling:
+  Scheduler: slurm
+  SlurmQueues:
+    - Name: fast-gpu
+      Networking:
+        # Private subnet in us-east-1a
+        SubnetIds:
+          - subnet-044d187e65ce52d9a
+        AssignPublicIp: false
+      ComputeResources:
+        - Name: p5small
+          # Per node: p5.4xlarge = 1 x H100, 16 vCPUs
+          InstanceType: p5.4xlarge
+          MinCount: 0
+          MaxCount: 2
