@@ -3,7 +3,7 @@
 # Replace the explicit distribution means/std values after collecting real logs.
 
 simulation:
-  batches: 4
+  batches: 40
   microbatches: 8
   seed: 42
 
@@ -37,5 +37,17 @@ optimizer:
 
 failure:
   enabled: false
+
+overrides:
+  links:
+    # Initial fit from experiments/link_bench.py p2p measurements on 2 x p5.4xlarge.
+    - src: h100_node0_gpu0
+      dst: h100_node1_gpu0
+      bandwidth_gbps: 12.5
+      latency_us: 200.0
+    - src: h100_node1_gpu0
+      dst: h100_node0_gpu0
+      bandwidth_gbps: 12.5
+      latency_us: 200.0
 
 output: {}

@@ -10,13 +10,14 @@
 
 set -euo pipefail
 
-SCENARIO_DIR=$(cd "$(dirname "$0")" && pwd)
-REPO_DIR=$(cd "$SCENARIO_DIR/../.." && pwd)
+REPO_DIR=$(cd "${SLURM_SUBMIT_DIR:-$(pwd)}" && pwd)
+SCENARIO_DIR="$REPO_DIR/experiments/01_h100_baseline_pp2"
 OUTPUT_DIR="$SCENARIO_DIR/output/${SLURM_JOB_ID:-manual}"
 mkdir -p "$OUTPUT_DIR"
 
 MEGATRON_DIR="${MEGATRON_DIR:?Set MEGATRON_DIR to your shared Megatron-LM checkout}"
 MEGATRON_ENTRYPOINT="${MEGATRON_ENTRYPOINT:-pretrain_gpt.py}"
+TRAIN_ENV_ACTIVATE="${TRAIN_ENV_ACTIVATE:-}"
 CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0,1}"
 MASTER_PORT="${MASTER_PORT:-29500}"
 
@@ -39,6 +40,10 @@ cat > "$OUTPUT_DIR/launch_megatron.sh" <<'EOF'
 #!/bin/bash
 set -euo pipefail
 
+if [[ -n "${TRAIN_ENV_ACTIVATE:-}" ]]; then
+  source "$TRAIN_ENV_ACTIVATE"
+fi
+
 cd "$MEGATRON_DIR"
 
 export CUDA_VISIBLE_DEVICES
@@ -59,10 +64,16 @@ MEGATRON_ARGS=(
   --micro-batch-size "$MICRO_BATCH_SIZE"
   --global-batch-size "$GLOBAL_BATCH_SIZE"
   --train-iters "$TRAIN_ITERS"
+  --eval-interval "$TRAIN_ITERS"
+  --eval-iters 0
   --lr 1.0e-4
   --min-lr 1.0e-4
   --lr-decay-style constant
   --bf16
+  --transformer-impl local
+  --no-persist-layer-norm
+  --no-gradient-accumulation-fusion
+  --no-masked-softmax-fusion
   --mock-data
   --tokenizer-type NullTokenizer
   --vocab-size 50304
@@ -82,7 +93,7 @@ EOF
 chmod +x "$OUTPUT_DIR/launch_megatron.sh"
 
 cd "$REPO_DIR"
-uv run python main.py \
+env -u VIRTUAL_ENV uv run python main.py \
   --config "$SCENARIO_DIR/hops.yaml" \
   --no-viz \
   --summary-json "$OUTPUT_DIR/hops_summary.json" \
@@ -91,6 +102,7 @@ uv run python main.py \
 
 export MEGATRON_DIR
 export MEGATRON_ENTRYPOINT
+export TRAIN_ENV_ACTIVATE
 export CUDA_VISIBLE_DEVICES
 export MASTER_ADDR=127.0.0.1
 export MASTER_PORT

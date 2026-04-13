@@ -42,6 +42,7 @@ These assets are designed for a small ParallelCluster validation campaign where:
 
 - This repo is visible on the compute nodes through shared storage.
 - `MEGATRON_DIR` points to a shared Megatron-LM checkout.
+- `TRAIN_ENV_ACTIVATE` may be set to the training environment activation script, for example `/home/ubuntu/megatron-env/bin/activate`.
 - The nodes have a working CUDA/NCCL stack.
 - The head node can submit Slurm jobs.
 - For the heterogeneous scripts, the allocation contains exactly one H100 node and one A100 node.
@@ -51,18 +52,21 @@ These assets are designed for a small ParallelCluster validation campaign where:
 Single-node H100 baseline:
 
 ```bash
+export TRAIN_ENV_ACTIVATE=/home/ubuntu/megatron-env/bin/activate
 sbatch -p p5 experiments/01_h100_baseline_pp2/run.slurm
 ```
 
 Single-node A100 baseline:
 
 ```bash
+export TRAIN_ENV_ACTIVATE=/home/ubuntu/megatron-env/bin/activate
 sbatch -p p4d experiments/02_a100_baseline_pp2/run.slurm
 ```
 
 Heterogeneous scenarios:
 
 ```bash
+export TRAIN_ENV_ACTIVATE=/home/ubuntu/megatron-env/bin/activate
 sbatch experiments/03_hetero_even_pp4/run.slurm
 sbatch experiments/04_hetero_weighted_pp4/run.slurm
 ```
@@ -70,6 +74,7 @@ sbatch experiments/04_hetero_weighted_pp4/run.slurm
 Two-node H100 baseline:
 
 ```bash
+export TRAIN_ENV_ACTIVATE=/home/ubuntu/megatron-env/bin/activate
 sbatch experiments/05_h100_dual_node_pp2/run.slurm
 ```
 

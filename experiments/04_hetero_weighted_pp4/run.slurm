@@ -14,13 +14,14 @@
 
 set -euo pipefail
 
-SCENARIO_DIR=$(cd "$(dirname "$0")" && pwd)
-REPO_DIR=$(cd "$SCENARIO_DIR/../.." && pwd)
+REPO_DIR=$(cd "${SLURM_SUBMIT_DIR:-$(pwd)}" && pwd)
+SCENARIO_DIR="$REPO_DIR/experiments/04_hetero_weighted_pp4"
 OUTPUT_DIR="$SCENARIO_DIR/output/${SLURM_JOB_ID:-manual}"
 mkdir -p "$OUTPUT_DIR"
 
 MEGATRON_DIR="${MEGATRON_DIR:?Set MEGATRON_DIR to your shared Megatron-LM checkout}"
 MEGATRON_ENTRYPOINT="${MEGATRON_ENTRYPOINT:-pretrain_gpt.py}"
+TRAIN_ENV_ACTIVATE="${TRAIN_ENV_ACTIVATE:-}"
 CUDA_VISIBLE_DEVICES_PER_NODE="${CUDA_VISIBLE_DEVICES_PER_NODE:-0,1}"
 MASTER_PORT="${MASTER_PORT:-29511}"
 
@@ -45,9 +46,13 @@ NODE1_GPU=$(gpu_name_for_node "${NODES[1]}")
 if [[ "$NODE0_GPU" =~ H100 && "$NODE1_GPU" =~ A100 ]]; then
   H100_NODE=${NODES[0]}
   A100_NODE=${NODES[1]}
+  H100_GPU_NAME=$NODE0_GPU
+  A100_GPU_NAME=$NODE1_GPU
 elif [[ "$NODE0_GPU" =~ A100 && "$NODE1_GPU" =~ H100 ]]; then
   H100_NODE=${NODES[1]}
   A100_NODE=${NODES[0]}
+  H100_GPU_NAME=$NODE1_GPU
+  A100_GPU_NAME=$NODE0_GPU
 else
   echo "Could not find one H100 node and one A100 node in allocation:" >&2
   echo "  ${NODES[0]} -> $NODE0_GPU" >&2
@@ -56,8 +61,8 @@ else
 fi
 
 {
-  echo "h100_node=$H100_NODE gpu=$NODE0_GPU"
-  echo "a100_node=$A100_NODE gpu=$NODE1_GPU"
+  echo "h100_node=$H100_NODE gpu=$H100_GPU_NAME"
+  echo "a100_node=$A100_NODE gpu=$A100_GPU_NAME"
   echo "cuda_visible_devices_per_node=$CUDA_VISIBLE_DEVICES_PER_NODE"
 } > "$OUTPUT_DIR/node_inventory.txt"
 
@@ -66,6 +71,11 @@ cat > "$OUTPUT_DIR/launch_megatron.sh" <<'EOF'
 set -euo pipefail
 
 NODE_RANK=$1
+
+if [[ -n "${TRAIN_ENV_ACTIVATE:-}" ]]; then
+  source "$TRAIN_ENV_ACTIVATE"
+fi
+
 cd "$MEGATRON_DIR"
 
 export CUDA_VISIBLE_DEVICES="$CUDA_VISIBLE_DEVICES_PER_NODE"
@@ -86,10 +96,16 @@ MEGATRON_ARGS=(
   --micro-batch-size "$MICRO_BATCH_SIZE"
   --global-batch-size "$GLOBAL_BATCH_SIZE"
   --train-iters "$TRAIN_ITERS"
+  --eval-interval "$TRAIN_ITERS"
+  --eval-iters 0
   --lr 1.0e-4
   --min-lr 1.0e-4
   --lr-decay-style constant
   --bf16
+  --transformer-impl local
+  --no-persist-layer-norm
+  --no-gradient-accumulation-fusion
+  --no-masked-softmax-fusion
   --mock-data
   --tokenizer-type NullTokenizer
   --vocab-size 50304
@@ -114,7 +130,7 @@ EOF
 chmod +x "$OUTPUT_DIR/launch_megatron.sh"
 
 cd "$REPO_DIR"
-uv run python main.py \
+env -u VIRTUAL_ENV uv run python main.py \
   --config "$SCENARIO_DIR/hops.yaml" \
   --no-viz \
   --summary-json "$OUTPUT_DIR/hops_summary.json" \
@@ -123,6 +139,7 @@ uv run python main.py \
 
 export MEGATRON_DIR
 export MEGATRON_ENTRYPOINT
+export TRAIN_ENV_ACTIVATE
 export CUDA_VISIBLE_DEVICES_PER_NODE
 export MASTER_ADDR="$H100_NODE"
 export MASTER_PORT
