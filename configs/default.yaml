@@ -9,10 +9,7 @@ simulation:
 pipeline:
   schedule: 1f1b
   precision: bf16
-  # activation_mb: 50  # derived automatically from model block below (3200*4096*4/1M = 50)
-  model:
-    hidden_dim: 3200
-    seq_len: 4096
+  activation_mb: 50
   backward_factor: 2.0
   stages:
     - device: node0_gpu0

@@ -1,6 +1,7 @@
 # HOPS analytical-mode example
 # Demonstrates: analytical compute with default efficiency (0.3) and
-# auto-derived activation_mb from the model block.
+# heuristic activation_mb derivation from the model block.
+# For experiment-matched studies, prefer an explicit calibrated activation_mb.
 
 simulation:
   batches: 1

@@ -59,7 +59,7 @@ simulation:
 pipeline:
   schedule: 1f1b
   precision: bf16
-  activation_mb: 50          # or use model: {hidden_dim: 3200, seq_len: 4096} to auto-derive
+  activation_mb: 50          # explicit sizing is preferred for experiment-matched runs
   backward_factor: 2.0
   stages:
     - device: node0_gpu0
@@ -126,6 +126,9 @@ Activation size per microbatch can be specified in two ways:
    Formula: `activation_mb = hidden_dim * seq_len * 4 / (1024 * 1024)` (fp32 bytes; precision scaling applied automatically).
 
 If both are present, the explicit `activation_mb` wins.
+The `model` path is a convenience heuristic based only on shape metadata.
+For comparisons against real Megatron runs or other calibrated experiments,
+prefer an explicit `activation_mb`.
 
 ### Compute modes
 

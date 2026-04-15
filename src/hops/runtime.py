@@ -114,7 +114,9 @@ def _resolve_activation_mb(config: AppConfig) -> float:
     If the user supplied ``activation_mb`` explicitly it is returned as-is.
     Otherwise it is derived from the ``model`` block:
     ``hidden_dim * seq_len * 4 bytes / (1024 * 1024)``.
-    Precision scaling is applied separately downstream.
+    Precision scaling is applied separately downstream. This derivation is a
+    convenience heuristic; experiment-calibrated configs should continue to
+    provide ``activation_mb`` explicitly.
     """
     if config.pipeline.activation_mb is not None:
         return config.pipeline.activation_mb

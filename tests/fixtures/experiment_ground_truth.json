@@ -1,0 +1,78 @@
+{
+  "exp05_run26": {
+    "fit1_throughput_per_s": 12.180684926373369,
+    "hops_bubble_ratio": 0.11659879987806125,
+    "hops_completed_microbatches": 32,
+    "hops_throughput_per_s": 26.741269097375586,
+    "megatron_iteration_ms": [
+      5430.1,
+      3086.5,
+      580.6,
+      583.4,
+      672.5,
+      601.7,
+      605.3,
+      619.2,
+      682.5,
+      785.5,
+      640.2,
+      627.7,
+      620.2,
+      576.9,
+      593.3,
+      585.9,
+      695.2,
+      669.2,
+      620.4,
+      790.6,
+      591.0,
+      611.0,
+      770.5,
+      592.6,
+      609.0,
+      599.9,
+      678.0,
+      614.6,
+      581.6,
+      682.4,
+      593.5,
+      602.0,
+      749.2,
+      683.8,
+      616.8,
+      683.7,
+      610.0,
+      690.7,
+      732.4,
+      604.5
+    ]
+  },
+  "exp06_run1": {
+    "megatron_bubble_ratio": 0.1616322392893241,
+    "megatron_completed_microbatches": 4,
+    "megatron_throughput_per_s": 0.5978082761117864,
+    "megatron_trace_durations_ms": [
+      3505.366699,
+      2045.1538090000004,
+      30.040992999999617,
+      5.281792000000678,
+      7.417215999999826,
+      4.9409599999999045,
+      6.464415999999801,
+      4.943712000000232
+    ]
+  },
+  "exp06_run2": {
+    "comparison_hops_throughput_per_s": 33.92759055975943,
+    "comparison_megatron_throughput_per_s": 60.50546751606662,
+    "hops_completed_microbatches": 4,
+    "megatron_completed_microbatches": 2,
+    "megatron_throughput_per_s": 60.50546751606662,
+    "megatron_trace_durations_ms": [
+      7.344832,
+      5.125439999999999,
+      6.4962240000000016,
+      4.987584000000002
+    ]
+  }
+}
