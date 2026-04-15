@@ -1,10 +1,18 @@
 # Max cluster footprint:
 # - Head node: 1 x c6i.large = 2 vCPUs, no GPU
-# - fast-gpu: 2 x p5.4xlarge = 2 H100, 32 vCPUs total
-# - Max cluster total = 2 H100, 34 vCPUs including head
-# Capacity reservation target:
-# - Capacity block reservation id: EXPIRED
+# - fast-gpu: 1 x p5.4xlarge = 1 H100, 16 vCPUs total
+# - Max cluster total = 1 H100, 18 vCPUs including head
+#
+# Intended use:
+# - smoke-test Megatron tracing and HOPS conversion with a single H100
+# - PP=1 / 1 GPU runs such as experiments/06_h100_single_gpu_smoke
+#
+# Replace the reservation id below with your active 1-instance Capacity Block
+# reservation before creating the cluster.
+#
+# Example target:
 # - AZ: us-east-1f
+# - Instance type: p5.4xlarge
 
 Region: us-east-1
 
@@ -12,7 +20,6 @@ Image:
   Os: ubuntu2204
 
 HeadNode:
-  # Head node only: c6i.large = 2 vCPUs, no GPU
   InstanceType: c6i.large
   Ssh:
     KeyName: megatron-key
@@ -34,7 +41,7 @@ Scheduling:
         - Name: p5small
           # Per node: p5.4xlarge = 1 x H100, 16 vCPUs
           InstanceType: p5.4xlarge
-          MinCount: 2
-          MaxCount: 2
+          MinCount: 1
+          MaxCount: 1
           CapacityReservationTarget:
-            CapacityReservationId: cr-07d110b7c381cbe48
+            CapacityReservationId: cr-01fcac74f975b54ba

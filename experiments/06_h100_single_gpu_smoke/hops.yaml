@@ -1,0 +1,35 @@
+# Single-GPU H100 smoke-test template.
+# This mirrors a 1-node / 1-GPU Megatron run with PP=1 and is intended only
+# to validate tracing + conversion plumbing, not pipeline communication.
+
+simulation:
+  batches: 4
+  microbatches: 1
+  seed: 42
+
+pipeline:
+  schedule: 1f1b
+  precision: bf16
+  activation_mb: 64
+  backward_factor: 2.0
+  stages:
+    - device: h100_node0_gpu0
+      weights_mb: 2048
+      compute:
+        mode: explicit
+        distribution: { type: normal, mean: 20.0, std: 1.0 }
+
+hardware:
+  devices:
+    - { id: h100_node0_gpu0, gpu: h100, node: h100_node0, socket: 0 }
+  interconnect:
+    same_node: nvlink
+    cross_node: infiniband
+
+optimizer:
+  enabled: false
+
+failure:
+  enabled: false
+
+output: {}

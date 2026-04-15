@@ -8,26 +8,15 @@ These assets are designed for a small ParallelCluster validation campaign where:
 
 ## Scenarios
 
-1. `01_h100_baseline_pp2`
-   Single-node H100 baseline using 2 GPUs and `PP=2`.
-   Purpose: calibrate per-stage H100 timing without cross-node effects.
-
-2. `02_a100_baseline_pp2`
-   Single-node A100 baseline using 2 GPUs and `PP=2`.
-   Purpose: calibrate per-stage A100 timing without cross-node effects.
-
-3. `03_hetero_even_pp4`
-   Mixed H100+A100 run using 2 GPUs from each node and `PP=4`.
-   Purpose: measure the naive heterogeneous pipeline with an even layer split.
-
-4. `04_hetero_weighted_pp4`
-   Mixed H100+A100 run using 2 GPUs from each node and `PP=4`.
-   Purpose: measure whether giving more layers to the H100 stages improves throughput.
-
-5. `05_h100_dual_node_pp2`
+1. `05_h100_dual_node_pp2`
    Two-node H100 baseline using 1 GPU per node and `PP=2`.
    Purpose: validate HOPS against a capacity-constrained H100 setup such as `2 x p5.4xlarge`,
    where each stage runs on a different node and all pipeline communication is cross-node.
+
+2. `06_h100_single_gpu_smoke`
+   Single-node H100 smoke test using 1 GPU and `PP=1`.
+   Purpose: validate Megatron tracing, raw JSONL emission, and HOPS conversion plumbing
+   without requiring a second GPU or any cross-stage communication.
 
 ## Files
 
@@ -37,6 +26,9 @@ These assets are designed for a small ParallelCluster validation campaign where:
   Initial HOPS template for the scenario. The explicit stage means are placeholders that should be updated after the first calibration run.
 - `*/run.slurm`
   Slurm batch script intended for submission from the ParallelCluster head node.
+- `pcluster_configs/cluster_p5small_capacity_block_1gpu.yaml`
+  Dedicated ParallelCluster config for a single `p5.4xlarge` H100 Capacity Block cluster
+  used by the smoke-test scenario.
 
 ## Prerequisites
 
@@ -68,33 +60,27 @@ launch Megatron.
 
 ## Submission Examples
 
-Single-node H100 baseline:
-
-```bash
-export TRAIN_ENV_ACTIVATE=/home/ubuntu/megatron-env/bin/activate
-sbatch -p p5 experiments/01_h100_baseline_pp2/run.slurm
-```
-
-Single-node A100 baseline:
-
-```bash
-export TRAIN_ENV_ACTIVATE=/home/ubuntu/megatron-env/bin/activate
-sbatch -p p4d experiments/02_a100_baseline_pp2/run.slurm
-```
-
-Heterogeneous scenarios:
-
-```bash
-export TRAIN_ENV_ACTIVATE=/home/ubuntu/megatron-env/bin/activate
-sbatch experiments/03_hetero_even_pp4/run.slurm
-sbatch experiments/04_hetero_weighted_pp4/run.slurm
-```
-
 Two-node H100 baseline:
 
 ```bash
 export TRAIN_ENV_ACTIVATE=/home/ubuntu/megatron-env/bin/activate
 sbatch experiments/05_h100_dual_node_pp2/run.slurm
+```
+
+Single-node H100 smoke test:
+
+```bash
+export TRAIN_ENV_ACTIVATE=/home/ubuntu/megatron-env/bin/activate
+sbatch experiments/06_h100_single_gpu_smoke/run.slurm
+```
+
+Single-node H100 smoke-test cluster creation:
+
+```bash
+pcluster create-cluster \
+  --cluster-name <cluster-name> \
+  --cluster-configuration experiments/pcluster_configs/cluster_p5small_capacity_block_1gpu.yaml \
+  --region us-east-1
 ```
 
 If your cluster does not expose both node types from one partition, keep the inner `torchrun` logic from the heterogeneous scripts but translate the allocation to your site-specific Slurm constraints.
