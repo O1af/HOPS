@@ -144,7 +144,7 @@ if [[ -n "${MEGATRON_EXTRA_ARGS:-}" ]]; then
   MEGATRON_ARGS+=("${EXTRA_ARGS[@]}")
 fi
 
-torchrun \
+python -m torch.distributed.run \
   --nnodes="$NNODES" \
   --nproc_per_node="$LOCAL_GPU_COUNT" \
   --node_rank="$NODE_RANK" \

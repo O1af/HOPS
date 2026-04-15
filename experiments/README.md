@@ -26,16 +26,47 @@ These assets are designed for a small ParallelCluster validation campaign where:
   Initial HOPS template for the scenario. The explicit stage means are placeholders that should be updated after the first calibration run.
 - `*/run.slurm`
   Slurm batch script intended for submission from the ParallelCluster head node.
-- `pcluster_configs/cluster_p5small_capacity_block_1gpu.yaml`
-  Dedicated ParallelCluster config for a single `p5.4xlarge` H100 Capacity Block cluster
-  used by the smoke-test scenario.
+- `05_h100_dual_node_pp2/cluster_p5small_capacity_block_1f.yaml`
+  Dedicated ParallelCluster config for the two-node H100 baseline.
+- `06_h100_single_gpu_smoke/cluster_p5small_capacity_block_1gpu.yaml`
+  Dedicated ParallelCluster config for the single-node H100 smoke test.
+
+## Fresh Cluster Bootstrap
+
+On a fresh head node, do not assume `/home/ubuntu/megatron-env` already exists.
+Bootstrap the Python tooling with `uv`, then create the Megatron training environment
+explicitly:
+
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+source "$HOME/.local/bin/env"
+
+cd /home/ubuntu
+git clone https://github.com/O1af/HOPS.git
+git clone https://github.com/O1af/Megatron-LM.git
+
+cd /home/ubuntu/HOPS
+uv sync
+
+cd /home/ubuntu
+uv python install 3.12
+uv venv --python 3.12 /home/ubuntu/megatron-env
+source /home/ubuntu/megatron-env/bin/activate
+uv pip install --upgrade pip setuptools wheel
+uv pip install torch torchvision torchaudio pyyaml pybind11
+
+cd /home/ubuntu/Megatron-LM
+git checkout hops-tracing
+MAX_JOBS=4 uv pip install -e .
+```
 
 ## Prerequisites
 
 - This repo is visible on the compute nodes through shared storage.
+- `uv` is installed on the head node and available on compute nodes via `source "$HOME/.local/bin/env"`.
 - `MEGATRON_DIR` points to a shared Megatron-LM checkout.
-- `TRAIN_ENV_ACTIVATE` may be set to the training environment activation script, for example `/home/ubuntu/megatron-env/bin/activate`.
-- The training environment referenced by `TRAIN_ENV_ACTIVATE` must provide `torchrun` or
+- `TRAIN_ENV_ACTIVATE` points to the training environment activation script, typically `/home/ubuntu/megatron-env/bin/activate`.
+- The training environment referenced by `TRAIN_ENV_ACTIVATE` must provide PyTorch and
   a working `python -m torch.distributed.run`.
 - The nodes have a working CUDA/NCCL stack.
 - The head node can submit Slurm jobs.
@@ -47,22 +78,23 @@ Before submitting any Megatron-backed experiment, verify the training environmen
 head node:
 
 ```bash
+source "$HOME/.local/bin/env"
 source /home/ubuntu/megatron-env/bin/activate
 which python
-which torchrun
-python -c "import torch; print(torch.__version__)"
-python -m torch.distributed.run --help >/dev/null && echo "torch.distributed.run works"
+python -c "print('python ok')"
+timeout 30s python -c "import torch; print(torch.__version__)"
+timeout 30s python -c "import torch.distributed.run; print('torch.distributed.run import works')"
 ```
 
-If `which torchrun` is empty or `torch.distributed.run` fails, fix the training environment
-before submitting. Otherwise the Slurm job will fail on the compute nodes when it tries to
-launch Megatron.
+If either timed import fails or times out, fix the training environment before submitting.
+Otherwise the Slurm job will fail on the compute nodes when it tries to launch Megatron.
 
 ## Submission Examples
 
 Two-node H100 baseline:
 
 ```bash
+export MEGATRON_DIR=/home/ubuntu/Megatron-LM
 export TRAIN_ENV_ACTIVATE=/home/ubuntu/megatron-env/bin/activate
 sbatch experiments/05_h100_dual_node_pp2/run.slurm
 ```
@@ -70,6 +102,7 @@ sbatch experiments/05_h100_dual_node_pp2/run.slurm
 Single-node H100 smoke test:
 
 ```bash
+export MEGATRON_DIR=/home/ubuntu/Megatron-LM
 export TRAIN_ENV_ACTIVATE=/home/ubuntu/megatron-env/bin/activate
 sbatch experiments/06_h100_single_gpu_smoke/run.slurm
 ```
@@ -79,11 +112,11 @@ Single-node H100 smoke-test cluster creation:
 ```bash
 pcluster create-cluster \
   --cluster-name <cluster-name> \
-  --cluster-configuration experiments/pcluster_configs/cluster_p5small_capacity_block_1gpu.yaml \
+  --cluster-configuration experiments/06_h100_single_gpu_smoke/cluster_p5small_capacity_block_1gpu.yaml \
   --region us-east-1
 ```
 
-If your cluster does not expose both node types from one partition, keep the inner `torchrun` logic from the heterogeneous scripts but translate the allocation to your site-specific Slurm constraints.
+If your cluster does not expose both node types from one partition, keep the inner distributed-launch logic from the heterogeneous scripts but translate the allocation to your site-specific Slurm constraints.
 
 ## Reproducing Run 26
 
@@ -190,14 +223,14 @@ aws ec2 associate-route-table \
 
 Use the checked-in config:
 
-- `experiments/pcluster_configs/cluster_p5small_capacity_block_1f.yaml`
+- `experiments/05_h100_dual_node_pp2/cluster_p5small_capacity_block_1f.yaml`
 
 Dry-run first:
 
 ```bash
 pcluster create-cluster \
   --cluster-name <cluster-name> \
-  --cluster-configuration experiments/pcluster_configs/cluster_p5small_capacity_block_1f.yaml \
+  --cluster-configuration experiments/05_h100_dual_node_pp2/cluster_p5small_capacity_block_1f.yaml \
   --region us-east-1 \
   --dryrun true
 ```
@@ -207,7 +240,7 @@ Then create the cluster:
 ```bash
 pcluster create-cluster \
   --cluster-name <cluster-name> \
-  --cluster-configuration experiments/pcluster_configs/cluster_p5small_capacity_block_1f.yaml \
+  --cluster-configuration experiments/05_h100_dual_node_pp2/cluster_p5small_capacity_block_1f.yaml \
   --region us-east-1
 ```
 
@@ -359,8 +392,8 @@ nodes=($(scontrol show hostnames "$SLURM_JOB_NODELIST"))
 ```
 
 ```bash
-srun --nodes=1 --ntasks=1 -w "${nodes[0]}" bash -lc 'source /home/ubuntu/megatron-env/bin/activate; torchrun --nnodes=2 --nproc_per_node=1 --node_rank=0 --master_addr='"${nodes[0]}"' --master_port=29500 /home/ubuntu/torch_dist_smoke.py' &
-srun --nodes=1 --ntasks=1 -w "${nodes[1]}" bash -lc 'source /home/ubuntu/megatron-env/bin/activate; torchrun --nnodes=2 --nproc_per_node=1 --node_rank=1 --master_addr='"${nodes[0]}"' --master_port=29500 /home/ubuntu/torch_dist_smoke.py' &
+srun --nodes=1 --ntasks=1 -w "${nodes[0]}" bash -lc 'source /home/ubuntu/megatron-env/bin/activate; python -m torch.distributed.run --nnodes=2 --nproc_per_node=1 --node_rank=0 --master_addr='"${nodes[0]}"' --master_port=29500 /home/ubuntu/torch_dist_smoke.py' &
+srun --nodes=1 --ntasks=1 -w "${nodes[1]}" bash -lc 'source /home/ubuntu/megatron-env/bin/activate; python -m torch.distributed.run --nnodes=2 --nproc_per_node=1 --node_rank=1 --master_addr='"${nodes[0]}"' --master_port=29500 /home/ubuntu/torch_dist_smoke.py' &
 wait
 ```
 
@@ -423,8 +456,8 @@ ts=$(date +%Y%m%d-%H%M%S)
 ```
 
 ```bash
-srun --nodes=1 --ntasks=1 -w "${nodes[0]}" bash -lc 'source /home/ubuntu/megatron-env/bin/activate; torchrun --nnodes=2 --nproc_per_node=1 --node_rank=0 --master_addr='"${nodes[0]}"' --master_port=29540 /home/ubuntu/HOPS/experiments/link_bench.py --mode p2p --sizes-mb 1,4,16,64 --dtype bfloat16 --label h100_pp2' > "$out/p2p_rank0_${ts}.jsonl" &
-srun --nodes=1 --ntasks=1 -w "${nodes[1]}" bash -lc 'source /home/ubuntu/megatron-env/bin/activate; torchrun --nnodes=2 --nproc_per_node=1 --node_rank=1 --master_addr='"${nodes[0]}"' --master_port=29540 /home/ubuntu/HOPS/experiments/link_bench.py --mode p2p --sizes-mb 1,4,16,64 --dtype bfloat16 --label h100_pp2' > "$out/p2p_rank1_${ts}.jsonl" &
+srun --nodes=1 --ntasks=1 -w "${nodes[0]}" bash -lc 'source /home/ubuntu/megatron-env/bin/activate; python -m torch.distributed.run --nnodes=2 --nproc_per_node=1 --node_rank=0 --master_addr='"${nodes[0]}"' --master_port=29540 /home/ubuntu/HOPS/experiments/link_bench.py --mode p2p --sizes-mb 1,4,16,64 --dtype bfloat16 --label h100_pp2' > "$out/p2p_rank0_${ts}.jsonl" &
+srun --nodes=1 --ntasks=1 -w "${nodes[1]}" bash -lc 'source /home/ubuntu/megatron-env/bin/activate; python -m torch.distributed.run --nnodes=2 --nproc_per_node=1 --node_rank=1 --master_addr='"${nodes[0]}"' --master_port=29540 /home/ubuntu/HOPS/experiments/link_bench.py --mode p2p --sizes-mb 1,4,16,64 --dtype bfloat16 --label h100_pp2' > "$out/p2p_rank1_${ts}.jsonl" &
 wait
 ```
 
