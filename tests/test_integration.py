@@ -87,6 +87,7 @@ def test_topology_fabric_and_derived_latency_run_together():
                         "mode": "analytical",
                         "tflop": 8.0,
                         "memory_mb": 200.0,
+                        "efficiency": {"compute": 1.0, "memory": 1.0},
                     },
                 },
                 {
@@ -96,6 +97,7 @@ def test_topology_fabric_and_derived_latency_run_together():
                         "mode": "analytical",
                         "tflop": 12.0,
                         "memory_mb": 200.0,
+                        "efficiency": {"compute": 1.0, "memory": 1.0},
                     },
                 },
             ],
@@ -177,3 +179,58 @@ def test_main_writes_summary_json_and_trace_csv(tmp_path, monkeypatch):
         rows = list(csv.DictReader(f))
     assert rows
     assert any(row["event_type"] == "compute" for row in rows)
+
+
+def test_analytical_mode_with_auto_derived_activation():
+    """Integration: analytical compute + model-derived activation, no manual activation_mb."""
+    config = {
+        "simulation": {"batches": 1, "microbatches": 2, "seed": 42},
+        "pipeline": {
+            "schedule": "1f1b",
+            "precision": "bf16",
+            "backward_factor": 2.0,
+            "model": {"hidden_dim": 1024, "seq_len": 512},
+            "stages": [
+                {
+                    "device": "gpu0",
+                    "weights_mb": 512.0,
+                    "compute": {
+                        "mode": "analytical",
+                        "tflop": 4.0,
+                        "efficiency": {"compute": 0.5, "memory": 0.5},
+                    },
+                },
+                {
+                    "device": "gpu1",
+                    "weights_mb": 512.0,
+                    "compute": {
+                        "mode": "analytical",
+                        "tflop": 4.0,
+                        "efficiency": {"compute": 0.5, "memory": 0.5},
+                    },
+                },
+            ],
+        },
+        "hardware": {
+            "devices": [
+                {"id": "gpu0", "gpu": "h100", "node": "node0", "socket": 0},
+                {"id": "gpu1", "gpu": "h100", "node": "node0", "socket": 1},
+            ],
+            "interconnect": {"same_node": "nvlink", "cross_node": "infiniband"},
+        },
+        "optimizer": {"enabled": False},
+        "failure": {"enabled": False},
+        "output": {},
+    }
+
+    runtime = build_runtime(parse_config(config))
+
+    # Verify auto-derived activation: 1024*512*4/1M = 2.0 MB fp32, * 0.5 bf16 = 1.0 MB
+    expected_fp32 = 1024 * 512 * 4 / (1024 * 1024)  # 2.0
+    assert abs(runtime.pipeline.activation_size_mb - expected_fp32 * 0.5) < 1e-9
+
+    runtime.pipeline.start_batch(runtime.num_microbatches)
+    runtime.engine.run()
+
+    assert runtime.collector.completed_microbatches == 2
+    assert runtime.collector.throughput() > 0

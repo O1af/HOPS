@@ -172,22 +172,22 @@ def test_preset_based_heterogeneous_4gpu_config_runs():
         {
             "device": "gpu0",
             "weights_mb": 1024.0,
-            "compute": {"mode": "analytical", "tflop": 4.0, "memory_mb": 64.0},
+            "compute": {"mode": "analytical", "tflop": 4.0, "memory_mb": 64.0, "efficiency": {"compute": 0.8, "memory": 0.9}},
         },
         {
             "device": "gpu1",
             "weights_mb": 1024.0,
-            "compute": {"mode": "analytical", "tflop": 4.0, "memory_mb": 64.0},
+            "compute": {"mode": "analytical", "tflop": 4.0, "memory_mb": 64.0, "efficiency": {"compute": 0.8, "memory": 0.9}},
         },
         {
             "device": "gpu2",
             "weights_mb": 1536.0,
-            "compute": {"mode": "analytical", "tflop": 6.0, "memory_mb": 96.0},
+            "compute": {"mode": "analytical", "tflop": 6.0, "memory_mb": 96.0, "efficiency": {"compute": 0.8, "memory": 0.9}},
         },
         {
             "device": "gpu3",
             "weights_mb": 1536.0,
-            "compute": {"mode": "analytical", "tflop": 6.0, "memory_mb": 96.0},
+            "compute": {"mode": "analytical", "tflop": 6.0, "memory_mb": 96.0, "efficiency": {"compute": 0.8, "memory": 0.9}},
         },
     ]
     config["hardware"]["devices"] = [
@@ -203,3 +203,102 @@ def test_preset_based_heterogeneous_4gpu_config_runs():
 
     assert runtime.collector.completed_microbatches == 4
     assert runtime.collector.throughput() > 0
+
+
+# ---- Model config / activation auto-derivation tests ----
+
+
+def test_parse_pipeline_with_model_config():
+    config = make_canonical_config()
+    del config["pipeline"]["activation_mb"]
+    config["pipeline"]["model"] = {"hidden_dim": 1024, "seq_len": 512}
+
+    parsed = parse_config(config)
+
+    assert parsed.pipeline.activation_mb is None
+    assert parsed.pipeline.model is not None
+    assert parsed.pipeline.model.hidden_dim == 1024
+    assert parsed.pipeline.model.seq_len == 512
+
+
+def test_parse_pipeline_requires_activation_mb_or_model():
+    config = make_canonical_config()
+    del config["pipeline"]["activation_mb"]
+
+    with pytest.raises(ValueError, match="activation_mb.*model"):
+        parse_config(config)
+
+
+def test_parse_pipeline_accepts_both_activation_mb_and_model():
+    config = make_canonical_config()
+    config["pipeline"]["model"] = {"hidden_dim": 1024, "seq_len": 512}
+
+    parsed = parse_config(config)
+
+    assert parsed.pipeline.activation_mb == 0.0
+    assert parsed.pipeline.model is not None
+
+
+def test_default_efficiency_applied_when_omitted():
+    config = make_canonical_config()
+    config["pipeline"]["stages"][0]["compute"] = {
+        "mode": "analytical",
+        "tflop": 4.0,
+    }
+
+    parsed = parse_config(config)
+
+    assert parsed.pipeline.stages[0].analytical.efficiency_compute == 0.3
+    assert parsed.pipeline.stages[0].analytical.efficiency_memory == 0.3
+
+
+def test_explicit_efficiency_overrides_default():
+    config = make_canonical_config()
+    config["pipeline"]["stages"][0]["compute"] = {
+        "mode": "analytical",
+        "tflop": 4.0,
+        "efficiency": {"compute": 0.72, "memory": 0.85},
+    }
+
+    parsed = parse_config(config)
+
+    assert parsed.pipeline.stages[0].analytical.efficiency_compute == 0.72
+    assert parsed.pipeline.stages[0].analytical.efficiency_memory == 0.85
+
+
+def test_resolve_activation_mb_from_model():
+    from hops.runtime import _resolve_activation_mb
+
+    config = make_canonical_config()
+    del config["pipeline"]["activation_mb"]
+    config["pipeline"]["model"] = {"hidden_dim": 4096, "seq_len": 2048}
+
+    parsed = parse_config(config)
+    result = _resolve_activation_mb(parsed)
+
+    expected = 4096 * 2048 * 4 / (1024 * 1024)  # 32.0 MB
+    assert abs(result - expected) < 1e-9
+
+
+def test_resolve_activation_mb_explicit_wins():
+    from hops.runtime import _resolve_activation_mb
+
+    config = make_canonical_config()
+    config["pipeline"]["activation_mb"] = 99.0
+    config["pipeline"]["model"] = {"hidden_dim": 4096, "seq_len": 2048}
+
+    parsed = parse_config(config)
+    result = _resolve_activation_mb(parsed)
+
+    assert result == 99.0
+
+
+def test_build_runtime_with_auto_derived_activation():
+    config = make_canonical_config()
+    del config["pipeline"]["activation_mb"]
+    config["pipeline"]["model"] = {"hidden_dim": 1024, "seq_len": 256}
+
+    runtime = build_runtime(parse_config(config))
+
+    expected_fp32 = 1024 * 256 * 4 / (1024 * 1024)  # 1.0 MB
+    assert abs(runtime.pipeline.activation_size_mb - expected_fp32) < 1e-9

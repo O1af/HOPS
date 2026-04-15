@@ -217,6 +217,7 @@ def test_derived_stage_latency_uses_device_capabilities():
                     "mode": "analytical",
                     "tflop": 10.0,
                     "memory_mb": 100.0,
+                    "efficiency": {"compute": 1.0, "memory": 1.0},
                 },
             }],
         },
@@ -300,6 +301,7 @@ def test_derived_latency_applies_memory_locality_penalty():
                     "mode": "analytical",
                     "tflop": 10.0,
                     "memory_mb": 100.0,
+                    "efficiency": {"compute": 1.0, "memory": 1.0},
                 },
                 "memory_placement": {
                     "kind": "socket",
