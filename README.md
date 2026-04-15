@@ -30,6 +30,12 @@ uv run pytest tests/test_pipeline.py  # run a specific test file
 uv run pytest -v           # verbose output
 ```
 
+Convert raw Megatron traces into HOPS-compatible artifacts:
+
+```bash
+uv run python -m hops.megatron_cli --job-dir experiments/05_h100_dual_node_pp2/output/<job_id>
+```
+
 ## Configuration
 
 HOPS now uses a canonical preset-first schema with these top-level sections:

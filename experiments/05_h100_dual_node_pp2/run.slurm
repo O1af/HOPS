@@ -17,13 +17,22 @@ set -euo pipefail
 REPO_DIR=$(cd "${SLURM_SUBMIT_DIR:-$(pwd)}" && pwd)
 SCENARIO_DIR="$REPO_DIR/experiments/05_h100_dual_node_pp2"
 OUTPUT_DIR="$SCENARIO_DIR/output/${SLURM_JOB_ID:-manual}"
-mkdir -p "$OUTPUT_DIR"
+TRACE_DIR="$OUTPUT_DIR/megatron_trace"
+PROFILER_DIR="$OUTPUT_DIR/torch_profiler"
+TRACE_MAP_FILE="$OUTPUT_DIR/hops_trace_map.json"
+mkdir -p "$OUTPUT_DIR" "$TRACE_DIR" "$PROFILER_DIR"
 
 MEGATRON_DIR="${MEGATRON_DIR:?Set MEGATRON_DIR to your shared Megatron-LM checkout}"
 MEGATRON_ENTRYPOINT="${MEGATRON_ENTRYPOINT:-pretrain_gpt.py}"
 TRAIN_ENV_ACTIVATE="${TRAIN_ENV_ACTIVATE:-}"
 CUDA_VISIBLE_DEVICES_PER_NODE="${CUDA_VISIBLE_DEVICES_PER_NODE:-0}"
 MASTER_PORT="${MASTER_PORT:-29520}"
+MEGATRON_EXTRA_ARGS="${MEGATRON_EXTRA_ARGS:-}"
+HOPS_TRACE_ENABLED="${HOPS_TRACE_ENABLED:-1}"
+HOPS_TRACE_FORMAT="${HOPS_TRACE_FORMAT:-jsonl}"
+HOPS_TRACE_START_ITER="${HOPS_TRACE_START_ITER:-3}"  # 1-indexed; default skips warmup iters 1-2
+HOPS_TRACE_END_ITER="${HOPS_TRACE_END_ITER:-0}"
+HOPS_TRACE_WITH_TORCH_PROFILER="${HOPS_TRACE_WITH_TORCH_PROFILER:-0}"
 
 IFS=',' read -r -a GPU_IDS <<< "$CUDA_VISIBLE_DEVICES_PER_NODE"
 LOCAL_GPU_COUNT=${#GPU_IDS[@]}
@@ -50,10 +59,22 @@ if [[ ! "$NODE0_GPU" =~ H100 || ! "$NODE1_GPU" =~ H100 ]]; then
   exit 1
 fi
 
+cat > "$TRACE_MAP_FILE" <<EOF
+{
+  "stages": {
+    "0": "h100_node0_gpu0",
+    "1": "h100_node1_gpu0"
+  }
+}
+EOF
+
 {
   echo "node0=${NODES[0]} gpu=$NODE0_GPU"
   echo "node1=${NODES[1]} gpu=$NODE1_GPU"
   echo "cuda_visible_devices_per_node=$CUDA_VISIBLE_DEVICES_PER_NODE"
+  echo "trace_dir=$TRACE_DIR"
+  echo "torch_profiler_dir=$PROFILER_DIR"
+  echo "trace_map_file=$TRACE_MAP_FILE"
 } > "$OUTPUT_DIR/node_inventory.txt"
 
 cat > "$OUTPUT_DIR/launch_megatron.sh" <<'EOF'
@@ -72,6 +93,17 @@ export CUDA_VISIBLE_DEVICES="$CUDA_VISIBLE_DEVICES_PER_NODE"
 export CUDA_DEVICE_MAX_CONNECTIONS=1
 export TORCH_NCCL_ASYNC_ERROR_HANDLING=1
 export NCCL_DEBUG=WARN
+export HOPS_TRACE_ENABLED
+export HOPS_TRACE_DIR
+export HOPS_TRACE_FORMAT
+export HOPS_TRACE_START_ITER
+export HOPS_TRACE_END_ITER
+export HOPS_TRACE_WITH_TORCH_PROFILER
+export HOPS_TORCH_PROFILER_DIR
+export HOPS_TRACE_MAP_FILE
+
+# If your Megatron checkout contains HOPS tracing hooks, they should consume the
+# HOPS_TRACE_* variables above and write one per-rank file into HOPS_TRACE_DIR.
 
 MEGATRON_ARGS=(
   "$MEGATRON_ENTRYPOINT"
@@ -105,6 +137,13 @@ MEGATRON_ARGS=(
   --log-throughput
 )
 
+if [[ -n "${MEGATRON_EXTRA_ARGS:-}" ]]; then
+  # Intentionally split additional CLI flags provided by the caller.
+  # shellcheck disable=SC2206
+  EXTRA_ARGS=( $MEGATRON_EXTRA_ARGS )
+  MEGATRON_ARGS+=("${EXTRA_ARGS[@]}")
+fi
+
 torchrun \
   --nnodes="$NNODES" \
   --nproc_per_node="$LOCAL_GPU_COUNT" \
@@ -131,6 +170,15 @@ export MASTER_ADDR="${NODES[0]}"
 export MASTER_PORT
 export NNODES=2
 export LOCAL_GPU_COUNT
+export MEGATRON_EXTRA_ARGS
+export HOPS_TRACE_ENABLED
+export HOPS_TRACE_FORMAT
+export HOPS_TRACE_START_ITER
+export HOPS_TRACE_END_ITER
+export HOPS_TRACE_WITH_TORCH_PROFILER
+export HOPS_TRACE_DIR="$TRACE_DIR"
+export HOPS_TORCH_PROFILER_DIR="$PROFILER_DIR"
+export HOPS_TRACE_MAP_FILE="$TRACE_MAP_FILE"
 export PIPELINE_PARALLEL_SIZE=2
 export NUM_LAYERS=8
 export HIDDEN_SIZE=3072
@@ -151,3 +199,8 @@ PID1=$!
 
 wait "$PID0"
 wait "$PID1"
+
+if compgen -G "$TRACE_DIR/*.jsonl" > /dev/null; then
+  env -u VIRTUAL_ENV uv run python -m hops.megatron_cli --job-dir "$OUTPUT_DIR" \
+    > "$OUTPUT_DIR/megatron_convert_stdout.txt"
+fi
