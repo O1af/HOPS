@@ -1,0 +1,47 @@
+# HOPS analytical-mode example
+# Demonstrates: analytical compute with default efficiency (0.3) and
+# heuristic activation_mb derivation from the model block.
+# For experiment-matched studies, prefer an explicit calibrated activation_mb.
+
+simulation:
+  batches: 1
+  microbatches: 4
+  seed: 42
+
+pipeline:
+  schedule: 1f1b
+  precision: bf16
+  backward_factor: 2.0
+  # No activation_mb -- derived from model block: 4096*2048*4/1M = 32 MB
+  model:
+    hidden_dim: 4096
+    seq_len: 2048
+  stages:
+    - device: gpu0
+      weights_mb: 2048
+      compute:
+        mode: analytical
+        tflop: 6.0
+        # efficiency omitted -- uses default 0.3
+    - device: gpu1
+      weights_mb: 2048
+      compute:
+        mode: analytical
+        tflop: 6.0
+
+hardware:
+  devices:
+    - { id: gpu0, gpu: h100, node: node0, socket: 0 }
+    - { id: gpu1, gpu: h100, node: node0, socket: 1 }
+  interconnect:
+    same_node: nvlink
+    cross_node: infiniband
+
+optimizer:
+  enabled: false
+
+failure:
+  enabled: false
+
+output:
+  summary_json: output/analytical_summary.json

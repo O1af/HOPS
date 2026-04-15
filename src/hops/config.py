@@ -8,6 +8,10 @@ from hops.core.types import AllreduceAlgo, Precision
 from hops.latency.distributions import Distribution
 
 
+DEFAULT_ANALYTICAL_EFFICIENCY = 0.3
+"""Fallback compute/memory efficiency when a stage omits the efficiency block."""
+
+
 def _require_positive(value: float | int, label: str) -> None:
     if value <= 0:
         raise ValueError(f"{label} must be > 0, got {value}")
@@ -65,13 +69,20 @@ class BackwardSplitConfig:
 
 
 @dataclass(frozen=True)
+class ModelConfig:
+    hidden_dim: int
+    seq_len: int
+
+
+@dataclass(frozen=True)
 class PipelineConfig:
     schedule: str
     precision: Precision
-    activation_mb: float
+    activation_mb: float | None
     backward_factor: float
     backward_split: BackwardSplitConfig
     stages: list[StageConfig]
+    model: ModelConfig | None = None
 
 
 @dataclass(frozen=True)
@@ -202,8 +213,18 @@ class ConfigParser:
         )
 
     def _parse_pipeline(self, raw: dict) -> PipelineConfig:
-        _require_non_negative(raw["activation_mb"], "pipeline.activation_mb")
+        activation_mb = raw.get("activation_mb")
+        if activation_mb is not None:
+            _require_non_negative(activation_mb, "pipeline.activation_mb")
         _require_positive(raw.get("backward_factor", 2.0), "pipeline.backward_factor")
+
+        model = self._parse_model(raw.get("model"))
+
+        if activation_mb is None and model is None:
+            raise ValueError(
+                "pipeline must specify either 'activation_mb' or a 'model' block "
+                "(with hidden_dim and seq_len) so activation size can be derived"
+            )
 
         split_raw = raw.get("backward_split", {})
         backward_split = BackwardSplitConfig(
@@ -222,11 +243,21 @@ class ConfigParser:
         return PipelineConfig(
             schedule=raw["schedule"],
             precision=Precision(raw.get("precision", "fp32")),
-            activation_mb=raw["activation_mb"],
+            activation_mb=activation_mb,
             backward_factor=raw.get("backward_factor", 2.0),
             backward_split=backward_split,
             stages=stages,
+            model=model,
         )
+
+    def _parse_model(self, raw: dict | None) -> ModelConfig | None:
+        if raw is None:
+            return None
+        if "hidden_dim" not in raw or "seq_len" not in raw:
+            raise ValueError("pipeline.model requires 'hidden_dim' and 'seq_len'")
+        _require_positive(raw["hidden_dim"], "pipeline.model.hidden_dim")
+        _require_positive(raw["seq_len"], "pipeline.model.seq_len")
+        return ModelConfig(hidden_dim=raw["hidden_dim"], seq_len=raw["seq_len"])
 
     def _parse_stage(self, stage_id: int, raw: dict) -> StageConfig:
         _require_non_negative(raw["weights_mb"], f"pipeline.stages[{stage_id}].weights_mb")
@@ -251,8 +282,8 @@ class ConfigParser:
             analytical = AnalyticalComputeConfig(
                 tflop=compute_raw["tflop"],
                 memory_mb=compute_raw.get("memory_mb", 0.0),
-                efficiency_compute=efficiency.get("compute", 1.0),
-                efficiency_memory=efficiency.get("memory", 1.0),
+                efficiency_compute=efficiency.get("compute", DEFAULT_ANALYTICAL_EFFICIENCY),
+                efficiency_memory=efficiency.get("memory", DEFAULT_ANALYTICAL_EFFICIENCY),
                 jitter=compute_raw.get("jitter", {"type": "constant", "value": 0.0}),
             )
             _require_positive(

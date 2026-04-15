@@ -108,8 +108,25 @@ def _resolve_link_overrides(link_overrides: list[LinkOverride]) -> list[Link]:
     ]
 
 
-def validate_memory(config: AppConfig, topology: Topology) -> None:
-    eff_activation = config.pipeline.activation_mb * config.pipeline.precision.data_scale
+def _resolve_activation_mb(config: AppConfig) -> float:
+    """Return the fp32-equivalent activation size in MB.
+
+    If the user supplied ``activation_mb`` explicitly it is returned as-is.
+    Otherwise it is derived from the ``model`` block:
+    ``hidden_dim * seq_len * 4 bytes / (1024 * 1024)``.
+    Precision scaling is applied separately downstream. This derivation is a
+    convenience heuristic; experiment-calibrated configs should continue to
+    provide ``activation_mb`` explicitly.
+    """
+    if config.pipeline.activation_mb is not None:
+        return config.pipeline.activation_mb
+    model = config.pipeline.model
+    assert model is not None  # enforced by config parser
+    return model.hidden_dim * model.seq_len * 4 / (1024 * 1024)
+
+
+def validate_memory(config: AppConfig, topology: Topology, activation_mb: float) -> None:
+    eff_activation = activation_mb * config.pipeline.precision.data_scale
     weight_overhead = config.pipeline.precision.weight_memory_overhead
     usage_by_device: dict[str, dict[str, float]] = {}
 
@@ -153,7 +170,8 @@ def build_runtime(config: AppConfig, registry: PresetRegistry | None = None) -> 
         link_profiles=profiles,
         locality_penalties=penalties,
     )
-    validate_memory(config, topology)
+    activation_mb = _resolve_activation_mb(config)
+    validate_memory(config, topology, activation_mb)
 
     compute_model = ComputeModel.from_pipeline_config(config.pipeline, topology=topology)
     scheduler = make_scheduler({"policy": config.pipeline.schedule})
@@ -172,7 +190,7 @@ def build_runtime(config: AppConfig, registry: PresetRegistry | None = None) -> 
         compute_model=compute_model,
         scheduler=scheduler,
         collector=collector,
-        activation_size_mb=config.pipeline.activation_mb,
+        activation_size_mb=activation_mb,
         rng=rng,
         optimizer_latency=optimizer_latency,
         gradient_size_mb=config.optimizer.gradient_mb,

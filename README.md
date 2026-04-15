@@ -59,7 +59,7 @@ simulation:
 pipeline:
   schedule: 1f1b
   precision: bf16
-  activation_mb: 50
+  activation_mb: 50          # explicit sizing is preferred for experiment-matched runs
   backward_factor: 2.0
   stages:
     - device: node0_gpu0
@@ -106,6 +106,30 @@ output:
   trace_csv: output/trace.csv
 ```
 
+### Activation size
+
+Activation size per microbatch can be specified in two ways:
+
+1. **Explicit** — set `activation_mb` directly under `pipeline`:
+   ```yaml
+   pipeline:
+     activation_mb: 50
+   ```
+
+2. **Auto-derived** — provide a `model` block and let HOPS compute it:
+   ```yaml
+   pipeline:
+     model:
+       hidden_dim: 4096
+       seq_len: 2048
+   ```
+   Formula: `activation_mb = hidden_dim * seq_len * 4 / (1024 * 1024)` (fp32 bytes; precision scaling applied automatically).
+
+If both are present, the explicit `activation_mb` wins.
+The `model` path is a convenience heuristic based only on shape metadata.
+For comparisons against real Megatron runs or other calibrated experiments,
+prefer an explicit `activation_mb`.
+
 ### Compute modes
 
 Each stage uses exactly one compute mode:
@@ -114,6 +138,12 @@ Each stage uses exactly one compute mode:
   Uses a measured or assumed latency distribution directly.
 - `mode: analytical`
   Derives latency from stage workload plus device preset capability.
+  When the `efficiency` block is omitted, a default of 0.3 (30%) is used for both compute and memory efficiency. Override per-stage:
+  ```yaml
+  efficiency:
+    compute: 0.72
+    memory: 0.85
+  ```
 
 Analytical stages support optional remote memory placement:
 
