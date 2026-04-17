@@ -44,6 +44,11 @@ def _iter_jsonl_rows(paths: Iterable[Path]) -> list[dict]:
                 stripped = line.strip()
                 if not stripped:
                     continue
+                # torchrun/NCCL/PyTorch warnings can land in the same file as
+                # the benchmark JSON rows. Treat this as mixed log output and
+                # keep only the JSON objects emitted by link_bench.py.
+                if not stripped.startswith("{"):
+                    continue
                 try:
                     rows.append(json.loads(stripped))
                 except json.JSONDecodeError as exc:

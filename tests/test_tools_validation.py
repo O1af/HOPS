@@ -109,6 +109,41 @@ def test_parse_link_bench_derives_bidirectional_overrides(tmp_path: Path) -> Non
     assert srcs == dsts == {"a10g_node0_gpu0", "a10g_node1_gpu0"}
 
 
+def test_parse_link_bench_ignores_mixed_torchrun_log_lines(tmp_path: Path) -> None:
+    path = tmp_path / "link_bench" / "pair_0_1.jsonl"
+    path.parent.mkdir(parents=True)
+    path.write_text(
+        "\n".join([
+            "/home/ubuntu/megatron-env/lib/python3.12/site-packages/torch/distributed/c10d_logger.py:83: UserWarning: barrier()",
+            "[rank0]:[W417 18:58:22.016887355 ProcessGroupNCCL.cpp:5188] Guessing device ID",
+            json.dumps({
+                "label": "pair_0_1",
+                "mode": "p2p",
+                "rank": 0,
+                "world_size": 2,
+                "hostname": "nodeA",
+                "size_mb": 1,
+                "dtype": "bfloat16",
+                "local_rank": 0,
+                "warmup": 0,
+                "iters": 1,
+                "mean_ms": 0.5,
+                "p50_ms": 0.5,
+                "p99_ms": 0.5,
+                "min_ms": 0.5,
+                "max_ms": 0.5,
+                "std_ms": 0.0,
+            }),
+        ])
+        + "\n",
+        encoding="utf-8",
+    )
+
+    rows = parse_link_bench._iter_jsonl_rows([path])
+    assert len(rows) == 1
+    assert rows[0]["label"] == "pair_0_1"
+
+
 def test_parse_link_bench_requires_both_ranks(tmp_path: Path) -> None:
     rows = [
         {"label": "pair_0_1", "mode": "p2p", "rank": 0, "size_mb": 1,
