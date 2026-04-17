@@ -23,9 +23,6 @@ import materialize_hops_variant  # noqa: E402
 import parse_link_bench  # noqa: E402
 
 
-# -- helpers -----------------------------------------------------------------
-
-
 def _write_jsonl(path: Path, rows: list[dict]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as handle:
@@ -67,9 +64,6 @@ def _base_config_dict() -> dict:
     }
 
 
-# -- parse_link_bench --------------------------------------------------------
-
-
 def test_parse_link_bench_derives_bidirectional_overrides(tmp_path: Path) -> None:
     input_dir = tmp_path / "link_bench"
     _write_jsonl(
@@ -101,7 +95,7 @@ def test_parse_link_bench_derives_bidirectional_overrides(tmp_path: Path) -> Non
     assert len(measurements) == 1
     m = measurements[0]
     assert (m.stage_src, m.stage_dst) == (0, 1)
-    # bandwidth = 64 * 8 / 54.237 ≈ 9.44 Gbps
+    # 64 MiB * 8 / 54.237 ms ≈ 9.44 Gbps
     assert m.bandwidth_gbps == pytest.approx(9.44, abs=0.05)
     assert m.latency_us == pytest.approx(500.0)
 
@@ -122,9 +116,6 @@ def test_parse_link_bench_requires_both_ranks(tmp_path: Path) -> None:
     ]
     with pytest.raises(ValueError, match="rank 0 and rank 1"):
         parse_link_bench.derive_pair_measurements(rows)
-
-
-# -- materialize_hops_variant ------------------------------------------------
 
 
 def test_materialize_applies_links_and_stage_overlays(tmp_path: Path) -> None:
@@ -160,17 +151,14 @@ def test_materialize_applies_links_and_stage_overlays(tmp_path: Path) -> None:
         base_path, [links_overlay, stage_overlay], output_path
     )
 
-    # Re-parse the file on disk and validate via HOPS.
     reloaded = yaml.safe_load(output_path.read_text())
     parse_config(reloaded)
 
     assert merged["overrides"]["links"][0]["bandwidth_gbps"] == pytest.approx(9.44)
     assert reloaded["pipeline"]["stages"][0]["compute"]["mode"] == "explicit"
     assert reloaded["pipeline"]["stages"][0]["compute"]["distribution"]["mean"] == pytest.approx(12.0)
-    # weights_mb and device carry through unchanged.
     assert reloaded["pipeline"]["stages"][0]["device"] == "a10g_node0_gpu0"
     assert reloaded["pipeline"]["stages"][0]["weights_mb"] == 64.0
-    # Banner present in the file.
     assert output_path.read_text().startswith("# GENERATED")
 
 
@@ -192,15 +180,9 @@ def test_materialize_fails_on_invalid_merged_config(tmp_path: Path) -> None:
         materialize_hops_variant.materialize(base_path, [bad_overlay], tmp_path / "out.yaml")
 
 
-# -- derive_megatron_stats ---------------------------------------------------
-
-
 def test_derive_megatron_stats_fits_forward_per_stage(tmp_path: Path) -> None:
     trace_dir = tmp_path / "megatron_trace"
     events = []
-    # Stage 0 forward: 10ms, 12ms, 11ms
-    # Stage 1 forward: 20ms, 21ms
-    # Stage 0 backward ignored
     stage0_durations = [10, 12, 11]
     stage1_durations = [20, 21]
     t0 = 1_000_000_000
@@ -220,7 +202,6 @@ def test_derive_megatron_stats_fits_forward_per_stage(tmp_path: Path) -> None:
             "end_wall_ns": t0 + i * 100_000_000 + 5_000_000 + dur * 1_000_000,
             "device_id": "a10g_node1_gpu0",
         })
-    # Backward event that must be ignored
     events.append({
         "rank": 0, "stage": 0, "iteration": 3, "microbatch": 0,
         "event_type": "compute", "phase": "BACKWARD",
@@ -230,10 +211,6 @@ def test_derive_megatron_stats_fits_forward_per_stage(tmp_path: Path) -> None:
     })
     _write_jsonl(trace_dir / "rank0.jsonl", events)
 
-    output = tmp_path / "stage_timings.yaml"
-    rc = derive_megatron_stats.main  # ensure callable exists
-
-    # Call the underlying fitter directly to avoid invoking argv.
     from hops.core.types import Phase
     from hops.megatron.importer import load_raw_megatron_events
 
@@ -248,10 +225,6 @@ def test_derive_megatron_stats_fits_forward_per_stage(tmp_path: Path) -> None:
     document = derive_megatron_stats.build_overlay(fits)
     assert document["pipeline"]["stages"][0]["compute"]["mode"] == "explicit"
     assert document["pipeline"]["stages"][0]["compute"]["distribution"]["type"] == "normal"
-    assert rc is not None  # reassure linter
-
-
-# -- compare_run -------------------------------------------------------------
 
 
 def _fake_summary(per_s: float, mean_ms: float, bubble: float = 0.1) -> dict:
@@ -311,12 +284,10 @@ def test_compare_run_tolerates_missing_variants(tmp_path: Path) -> None:
     (derived / "hops_no_lookahead_summary.json").write_text(
         json.dumps(_fake_summary(per_s=28.0, mean_ms=36.0))
     )
-    # No megatron summary and no other variants.
 
     comparison_path, _ = compare_run.run(job_dir)
     document = json.loads(comparison_path.read_text())
     assert document["megatron"] is None
     assert document["variants"]["link_calibrated"] == {"status": "missing"}
     assert document["variants"]["no_lookahead"]["throughput_per_s"] == pytest.approx(28.0)
-    # Without megatron, error_pct is None.
     assert document["variants"]["no_lookahead"]["throughput_error_pct"] is None

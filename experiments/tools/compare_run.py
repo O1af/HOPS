@@ -14,9 +14,9 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
 from pathlib import Path
-from typing import Any
+
+from _common import ensure_hops_importable
 
 
 VARIANT_ORDER = ("no_lookahead", "link_calibrated", "trace_replay")
@@ -34,12 +34,8 @@ VARIANT_SOURCES = {
 }
 
 
-def _repo_root() -> Path:
-    return Path(__file__).resolve().parents[2]
-
-
 def _import_hops():
-    sys.path.insert(0, str(_repo_root() / "src"))
+    ensure_hops_importable()
     from hops.megatron.compare import build_comparison, convert_job_dir  # type: ignore[import-not-found]
     return build_comparison, convert_job_dir
 
@@ -50,7 +46,7 @@ def _load_json(path: Path) -> dict | None:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def _ensure_megatron_summary(job_dir: Path) -> dict | None:
+def _ensure_megatron_summary(job_dir: Path, convert_job_dir) -> dict | None:
     summary_path = job_dir / "megatron_summary.json"
     existing = _load_json(summary_path)
     if existing is not None:
@@ -64,22 +60,18 @@ def _ensure_megatron_summary(job_dir: Path) -> dict | None:
     except StopIteration:
         return None
 
-    _, convert_job_dir = _import_hops()
     convert_job_dir(job_dir)
     return _load_json(summary_path)
 
 
 def _pct_delta(actual: float | None, predicted: float | None) -> float | None:
-    """Error of HOPS prediction vs measured Megatron, in percent."""
-    if actual is None or predicted is None:
-        return None
-    if actual == 0:
+    if actual is None or predicted is None or actual == 0:
         return None
     return (predicted - actual) / actual * 100.0
 
 
 def _summary_scalar(summary: dict, *keys: str) -> float | None:
-    cursor: Any = summary
+    cursor: object = summary
     for key in keys:
         if not isinstance(cursor, dict) or key not in cursor:
             return None
@@ -89,17 +81,16 @@ def _summary_scalar(summary: dict, *keys: str) -> float | None:
     return None
 
 
-def build_variant_row(megatron: dict, hops_summary: dict, build_comparison) -> dict:
+def _variant_row(summary: dict, megatron: dict | None, build_comparison) -> dict:
+    hops_throughput = _summary_scalar(summary, "throughput", "per_s")
+    megatron_throughput = _summary_scalar(megatron, "throughput", "per_s") if megatron else None
     return {
-        "summary": hops_summary,
-        "comparison": build_comparison(megatron, hops_summary),
-        "throughput_per_s": _summary_scalar(hops_summary, "throughput", "per_s"),
-        "throughput_error_pct": _pct_delta(
-            _summary_scalar(megatron, "throughput", "per_s"),
-            _summary_scalar(hops_summary, "throughput", "per_s"),
-        ),
-        "latency_mean_ms": _summary_scalar(hops_summary, "latency_ms", "mean_ms"),
-        "bubble_ratio": _summary_scalar(hops_summary, "bubble_ratio"),
+        "summary": summary,
+        "comparison": build_comparison(megatron, summary) if megatron is not None else None,
+        "throughput_per_s": hops_throughput,
+        "throughput_error_pct": _pct_delta(megatron_throughput, hops_throughput),
+        "latency_mean_ms": _summary_scalar(summary, "latency_ms", "mean_ms"),
+        "bubble_ratio": _summary_scalar(summary, "bubble_ratio"),
     }
 
 
@@ -115,18 +106,8 @@ def build_comparison_document(
         summary = variant_summaries.get(name)
         if summary is None:
             variants[name] = {"status": "missing"}
-            continue
-        if megatron is None:
-            variants[name] = {
-                "summary": summary,
-                "comparison": None,
-                "throughput_per_s": _summary_scalar(summary, "throughput", "per_s"),
-                "throughput_error_pct": None,
-                "latency_mean_ms": _summary_scalar(summary, "latency_ms", "mean_ms"),
-                "bubble_ratio": _summary_scalar(summary, "bubble_ratio"),
-            }
         else:
-            variants[name] = build_variant_row(megatron, summary, build_comparison)
+            variants[name] = _variant_row(summary, megatron, build_comparison)
 
     megatron_headline = None
     if megatron is not None:
@@ -211,8 +192,8 @@ def run(job_dir: Path, links_source: str = "(unknown)") -> tuple[Path, Path]:
     derived_dir = job_dir / "derived"
     derived_dir.mkdir(parents=True, exist_ok=True)
 
-    build_comparison, _ = _import_hops()
-    megatron = _ensure_megatron_summary(job_dir)
+    build_comparison, convert_job_dir = _import_hops()
+    megatron = _ensure_megatron_summary(job_dir, convert_job_dir)
 
     variant_summaries: dict[str, dict] = {}
     for name in VARIANT_ORDER:
