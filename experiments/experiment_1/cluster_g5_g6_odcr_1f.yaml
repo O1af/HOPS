@@ -1,0 +1,53 @@
+# Experiment 1 shared cluster:
+# - Head node: 1 x c6i.large
+# - g-hetero queue: 2 x g5.2xlarge + 2 x g6.4xlarge
+# - All compute nodes are in us-east-1f and target existing open ODCRs.
+
+Region: us-east-1
+
+Image:
+  Os: ubuntu2204
+
+HeadNode:
+  InstanceType: c6i.large
+  Ssh:
+    KeyName: megatron-key
+  Networking:
+    # Public subnet in us-east-1f
+    SubnetId: subnet-04fe51f1ae403287c
+
+Scheduling:
+  Scheduler: slurm
+  SlurmQueues:
+    - Name: g-hetero
+      CapacityType: ONDEMAND
+      Networking:
+        # Private subnet in us-east-1f
+        SubnetIds:
+          - subnet-0cbde9e3f3572b04b
+        AssignPublicIp: false
+      ComputeResources:
+        - Name: g5a
+          InstanceType: g5.2xlarge
+          MinCount: 1
+          MaxCount: 1
+          CapacityReservationTarget:
+            CapacityReservationId: cr-086df7f9e6889625e
+        - Name: g5b
+          InstanceType: g5.2xlarge
+          MinCount: 1
+          MaxCount: 1
+          CapacityReservationTarget:
+            CapacityReservationId: cr-09c1aed639199e8b1
+        - Name: g6a
+          InstanceType: g6.4xlarge
+          MinCount: 1
+          MaxCount: 1
+          CapacityReservationTarget:
+            CapacityReservationId: cr-035a73de7465afe91
+        - Name: g6b
+          InstanceType: g6.4xlarge
+          MinCount: 1
+          MaxCount: 1
+          CapacityReservationTarget:
+            CapacityReservationId: cr-0effa19780678c103

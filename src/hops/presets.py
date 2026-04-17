@@ -37,6 +37,18 @@ DEVICE_PRESETS: dict[str, DevicePreset] = {
         memory_mb=81920.0,
         memory_bandwidth_gbps=2039.0,
     ),
+    "a10g": DevicePreset(
+        kind="gpu",
+        flops_tflops=125.0,
+        memory_mb=24576.0,
+        memory_bandwidth_gbps=600.0,
+    ),
+    "l4": DevicePreset(
+        kind="gpu",
+        flops_tflops=121.0,
+        memory_mb=24576.0,
+        memory_bandwidth_gbps=300.0,
+    ),
     "l40s": DevicePreset(
         kind="gpu",
         flops_tflops=362.0,
