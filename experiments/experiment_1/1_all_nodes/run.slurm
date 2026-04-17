@@ -184,7 +184,7 @@ chmod +x "$OUTPUT_DIR/launch_megatron.sh"
 
 cd "$REPO_DIR"
 env -u VIRTUAL_ENV uv run python main.py \
-  --config "$SCENARIO_DIR/hops.yaml" \
+  --config "$SCENARIO_DIR/hops.base.yaml" \
   --no-viz \
   --summary-json "$OUTPUT_DIR/hops_summary.json" \
   --trace-csv "$OUTPUT_DIR/hops_trace.csv" \

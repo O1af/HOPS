@@ -217,6 +217,48 @@ rsync -avz -e "ssh -i <key.pem>" \
   /Users/olaf/Documents/HOPS/experiments/experiment_1/1_all_nodes/output/<job-id>/
 ```
 
+## Validation (three-variant comparison)
+
+`experiment_1/1_all_nodes` follows a split between *committed intent* and
+*generated calibration*:
+
+- `hops.base.yaml` is the committed no-lookahead scenario spec. Never hand-edit
+  calibrated numbers into it.
+- `run.slurm` produces an immutable run artifact under
+  `output/<run-job-id>/`.
+- `link_bench.slurm` is submitted separately after `run.slurm` completes; its
+  output lands under `output/<link-job-id>/calibration/link_bench/`.
+- `experiments/tools/run_validation.py` post-processes those artifacts locally
+  and emits `output/<run-job-id>/derived/{links.yaml,hops.link_calibrated.yaml,
+  hops.trace_replay.yaml,hops_*_summary.json,comparison.json,report.md}`.
+
+Three HOPS variants are always produced per run:
+
+| variant | uses run data? | compute | links |
+| --- | --- | --- | --- |
+| `no_lookahead` | no | analytical (committed) | preset |
+| `link_calibrated` | links only | analytical (committed) | measured |
+| `trace_replay` | yes (posthoc) | per-stage forward fit from `megatron_trace` | measured |
+
+`no_lookahead` and `link_calibrated` never see Megatron stage timings — that's
+the overfit guardrail. `trace_replay` is a scheduler/topology mechanics sanity
+check, not a predictive claim.
+
+Run it locally after `rsync`ing both job dirs back:
+
+```bash
+uv run python experiments/tools/run_validation.py \
+  --scenario experiments/experiment_1/1_all_nodes \
+  --job-id <run-job-id> \
+  --link-bench-dir experiments/experiment_1/1_all_nodes/output/<link-job-id>/calibration/link_bench
+```
+
+It prints `report.md` to stdout. If `--link-bench-dir` is omitted, the tool
+looks under `output/<run-job-id>/calibration/link_bench/` first.
+
+The individual tools can also be driven standalone for debugging — see
+`experiments/tools/{parse_link_bench,materialize_hops_variant,derive_megatron_stats,compare_run}.py`.
+
 ## Notes
 
 - G-family nodes in `experiment_1` use socket NCCL, not `aws-ofi-nccl`; the
