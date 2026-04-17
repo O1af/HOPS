@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import statistics
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -11,6 +12,9 @@ from hops.metrics.collector import MetricsCollector
 
 
 _SUPPORTED_EVENT_TYPES = {"compute", "transfer"}
+DEFAULT_WARMUP_FACTOR = 3.0
+"""An iteration is treated as warmup if its wall duration is at least this
+multiple of the trailing-iteration median. See strip_warmup_iterations."""
 
 
 @dataclass(frozen=True)
@@ -90,7 +94,57 @@ def _parse_event(data: dict) -> RawMegatronEvent:
     )
 
 
-def load_raw_megatron_events(trace_dir: str | Path) -> list[RawMegatronEvent]:
+def strip_warmup_iterations(
+    events: list[RawMegatronEvent],
+    factor: float = DEFAULT_WARMUP_FACTOR,
+) -> tuple[list[RawMegatronEvent], list[int]]:
+    """Drop leading iterations whose wall duration is >= factor * trailing median.
+
+    Walks iterations in order from the earliest. For each leading iteration, the
+    trailing median is the median wall duration of all later iterations. The
+    iteration is dropped iff its own wall duration is at least `factor` times
+    that trailing median. Stops at the first iteration that fails the test, so
+    only a contiguous warmup prefix is removed (mid-run anomalies are kept).
+
+    Returns the kept events and the list of dropped iteration indices.
+    """
+    if factor <= 0:
+        raise ValueError(f"warmup factor must be > 0, got {factor}")
+    per_iter: dict[int, list[RawMegatronEvent]] = {}
+    for event in events:
+        per_iter.setdefault(event.iteration, []).append(event)
+
+    iters = sorted(per_iter)
+    if len(iters) <= 1:
+        return list(events), []
+
+    durations: dict[int, int] = {}
+    for it in iters:
+        evs = per_iter[it]
+        durations[it] = max(e.end_wall_ns for e in evs) - min(e.start_wall_ns for e in evs)
+
+    dropped: list[int] = []
+    for i, it in enumerate(iters[:-1]):
+        trailing = [durations[j] for j in iters[i + 1:]]
+        median_trailing = statistics.median(trailing)
+        if median_trailing > 0 and durations[it] >= factor * median_trailing:
+            dropped.append(it)
+        else:
+            break
+
+    if not dropped:
+        return list(events), []
+    drop_set = set(dropped)
+    kept = [e for e in events if e.iteration not in drop_set]
+    return kept, dropped
+
+
+def load_raw_megatron_events(
+    trace_dir: str | Path,
+    *,
+    strip_warmup: bool = True,
+    warmup_factor: float = DEFAULT_WARMUP_FACTOR,
+) -> list[RawMegatronEvent]:
     path = Path(trace_dir)
     if not path.exists():
         raise FileNotFoundError(f"Megatron trace directory not found: {path}")
@@ -115,6 +169,8 @@ def load_raw_megatron_events(trace_dir: str | Path) -> list[RawMegatronEvent]:
     if not events:
         raise ValueError(f"No Megatron trace events found in {path}")
     events.sort(key=lambda event: event.time_key)
+    if strip_warmup:
+        events, _ = strip_warmup_iterations(events, factor=warmup_factor)
     return events
 
 
@@ -127,8 +183,15 @@ def _global_microbatch_ids(events: list[RawMegatronEvent]) -> dict[tuple[int, in
     return {pair: idx for idx, pair in enumerate(pairs)}
 
 
-def import_megatron_trace_dir(trace_dir: str | Path) -> MetricsCollector:
-    events = load_raw_megatron_events(trace_dir)
+def import_megatron_trace_dir(
+    trace_dir: str | Path,
+    *,
+    strip_warmup: bool = True,
+    warmup_factor: float = DEFAULT_WARMUP_FACTOR,
+) -> MetricsCollector:
+    events = load_raw_megatron_events(
+        trace_dir, strip_warmup=strip_warmup, warmup_factor=warmup_factor
+    )
     origin_ns = events[0].start_wall_ns  # list is sorted by time_key whose first element is start_wall_ns
     global_mb_ids = _global_microbatch_ids(events)
     collector = MetricsCollector()

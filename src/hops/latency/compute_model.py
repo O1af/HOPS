@@ -67,20 +67,30 @@ class ComputeModel:
     def __init__(self, stage_models: dict[int, StageLatencySource],
                  backward_factor: float = 2.0,
                  backward_b_fraction: float = 0.5,
-                 precision_speedup: float = 1.0):
+                 precision_speedup: float = 1.0,
+                 backward_models: dict[int, StageLatencySource] | None = None):
         self._models = stage_models
+        self._backward_models = backward_models or {}
         self._backward_factor = backward_factor
         self._backward_b_fraction = backward_b_fraction
         self._precision_speedup = precision_speedup
 
     def sample(self, stage_id: int, phase: Phase, rng: np.random.Generator) -> float:
-        base = self._models[stage_id].sample(rng)
-        if phase == Phase.BACKWARD:
-            base *= self._backward_factor
-        elif phase == Phase.BACKWARD_B:
-            base *= self._backward_factor * self._backward_b_fraction
-        elif phase == Phase.BACKWARD_W:
-            base *= self._backward_factor * (1.0 - self._backward_b_fraction)
+        if phase in (Phase.BACKWARD, Phase.BACKWARD_B, Phase.BACKWARD_W) \
+                and stage_id in self._backward_models:
+            base = self._backward_models[stage_id].sample(rng)
+            if phase == Phase.BACKWARD_B:
+                base *= self._backward_b_fraction
+            elif phase == Phase.BACKWARD_W:
+                base *= 1.0 - self._backward_b_fraction
+        else:
+            base = self._models[stage_id].sample(rng)
+            if phase == Phase.BACKWARD:
+                base *= self._backward_factor
+            elif phase == Phase.BACKWARD_B:
+                base *= self._backward_factor * self._backward_b_fraction
+            elif phase == Phase.BACKWARD_W:
+                base *= self._backward_factor * (1.0 - self._backward_b_fraction)
         if self._precision_speedup != 1.0:
             base /= self._precision_speedup
         return base
@@ -127,11 +137,17 @@ class ComputeModel:
     def from_pipeline_config(cls, pipeline: PipelineConfig,
                              topology: Topology) -> "ComputeModel":
         stage_models: dict[int, StageLatencySource] = {}
+        backward_models: dict[int, StageLatencySource] = {}
         for stage in pipeline.stages:
             stage_models[stage.id] = cls._stage_model_from_config(stage, topology)
+            if stage.backward is not None:
+                backward_models[stage.id] = DistributionLatency(
+                    Distribution.from_yaml(stage.backward.distribution)
+                )
         return cls(
             stage_models,
             backward_factor=pipeline.backward_factor,
             backward_b_fraction=pipeline.backward_split.activation_grad_fraction,
             precision_speedup=pipeline.precision.compute_speedup,
+            backward_models=backward_models,
         )

@@ -124,16 +124,23 @@ def run(
         _run_hops(link_cal_yaml, derived_dir / "hops_link_calibrated_summary.json")
 
     has_trace = False
+    has_optimizer = False
     stage_timings_overlay = derived_dir / "stage_timings.yaml"
+    optimizer_overlay = derived_dir / "optimizer.yaml"
     if has_links:
         trace_dir = job_dir / "megatron_trace"
         if trace_dir.is_dir() and any(trace_dir.glob("*.jsonl")):
-            has_trace = bool(
-                write_stage_timings_overlay(trace_dir, stage_timings_overlay, min_iteration)
+            forward_fits, _, optimizer_fit = write_stage_timings_overlay(
+                trace_dir, stage_timings_overlay, min_iteration, optimizer_overlay
             )
+            has_trace = bool(forward_fits)
+            has_optimizer = optimizer_fit is not None
     if has_trace:
+        overlays = [links_overlay, stage_timings_overlay]
+        if has_optimizer:
+            overlays.append(optimizer_overlay)
         trace_yaml = derived_dir / "hops.trace_replay.yaml"
-        materialize(base_config, [links_overlay, stage_timings_overlay], trace_yaml)
+        materialize(base_config, overlays, trace_yaml)
         _run_hops(trace_yaml, derived_dir / "hops_trace_replay_summary.json")
     elif has_links:
         print("[warn] no usable megatron_trace; variant 'trace_replay' skipped")

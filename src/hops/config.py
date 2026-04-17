@@ -52,6 +52,18 @@ class MemoryPlacement:
 
 
 @dataclass(frozen=True)
+class BackwardComputeConfig:
+    """Explicit per-stage backward latency distribution.
+
+    When present, ComputeModel uses this distribution directly for the BACKWARD
+    phase instead of scaling forward by pipeline.backward_factor. ZeroBubble
+    BACKWARD_B and BACKWARD_W are still derived from this via
+    backward_split.activation_grad_fraction.
+    """
+    distribution: dict
+
+
+@dataclass(frozen=True)
 class StageConfig:
     id: int
     device: str
@@ -59,6 +71,7 @@ class StageConfig:
     compute_mode: str
     analytical: AnalyticalComputeConfig | None = None
     explicit: ExplicitComputeConfig | None = None
+    backward: BackwardComputeConfig | None = None
     memory_placement: MemoryPlacement = field(default_factory=MemoryPlacement)
 
 
@@ -266,6 +279,7 @@ class ConfigParser:
         compute_raw = raw["compute"]
         mode = compute_raw["mode"]
         memory_placement = self._parse_memory_placement(stage_id, raw.get("memory_placement", {}))
+        backward = self._parse_backward(stage_id, raw.get("backward"))
 
         if mode == "analytical":
             if "tflop" not in compute_raw:
@@ -301,6 +315,7 @@ class ConfigParser:
                 weights_mb=raw["weights_mb"],
                 compute_mode=mode,
                 analytical=analytical,
+                backward=backward,
                 memory_placement=memory_placement,
             )
 
@@ -325,12 +340,25 @@ class ConfigParser:
                 weights_mb=raw["weights_mb"],
                 compute_mode=mode,
                 explicit=ExplicitComputeConfig(compute_raw["distribution"]),
+                backward=backward,
                 memory_placement=memory_placement,
             )
 
         raise ValueError(
             f"pipeline.stages[{stage_id}].compute.mode must be 'analytical' or 'explicit'"
         )
+
+    def _parse_backward(self, stage_id: int, raw: dict | None) -> BackwardComputeConfig | None:
+        if raw is None:
+            return None
+        if "distribution" not in raw:
+            raise ValueError(
+                f"pipeline.stages[{stage_id}].backward must define a distribution"
+            )
+        _require_distribution(
+            raw["distribution"], f"pipeline.stages[{stage_id}].backward.distribution"
+        )
+        return BackwardComputeConfig(distribution=raw["distribution"])
 
     def _parse_memory_placement(self, stage_id: int, raw: dict) -> MemoryPlacement:
         if not raw:
