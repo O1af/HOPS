@@ -249,8 +249,8 @@ def test_derive_megatron_stats_fits_forward_per_stage(tmp_path: Path) -> None:
     from hops.core.types import Phase
     from hops.megatron.importer import load_raw_megatron_events
 
-    loaded = load_raw_megatron_events(trace_dir)
-    fits = derive_megatron_stats.fit_stage_distributions(loaded, forward_phase=Phase.FORWARD)
+    loaded = load_raw_megatron_events(trace_dir, strip_warmup=False)
+    fits = derive_megatron_stats.fit_stage_distributions(loaded, phase=Phase.FORWARD)
     by_stage = {f.stage: f for f in fits}
     assert by_stage[0].mean_ms == pytest.approx(11.0)
     assert by_stage[1].mean_ms == pytest.approx(20.5)
@@ -260,6 +260,7 @@ def test_derive_megatron_stats_fits_forward_per_stage(tmp_path: Path) -> None:
     document = derive_megatron_stats.build_overlay(fits)
     assert document["pipeline"]["stages"][0]["compute"]["mode"] == "explicit"
     assert document["pipeline"]["stages"][0]["compute"]["distribution"]["type"] == "normal"
+    assert "backward" not in document["pipeline"]["stages"][0]
 
 
 def _fake_summary(per_s: float, mean_ms: float, bubble: float = 0.1) -> dict:
@@ -326,3 +327,256 @@ def test_compare_run_tolerates_missing_variants(tmp_path: Path) -> None:
     assert document["variants"]["link_calibrated"] == {"status": "missing"}
     assert document["variants"]["no_lookahead"]["throughput_per_s"] == pytest.approx(28.0)
     assert document["variants"]["no_lookahead"]["throughput_error_pct"] is None
+
+
+def _compute_event(*, stage: int, iteration: int, microbatch: int, phase: str,
+                   start_ns: int, dur_ms: float, device: str) -> dict:
+    return {
+        "rank": stage, "stage": stage, "iteration": iteration, "microbatch": microbatch,
+        "event_type": "compute", "phase": phase,
+        "start_wall_ns": start_ns,
+        "end_wall_ns": start_ns + int(dur_ms * 1_000_000),
+        "device_id": device,
+    }
+
+
+def test_derive_megatron_stats_emits_backward_overlay(tmp_path: Path) -> None:
+    trace_dir = tmp_path / "megatron_trace"
+    events: list[dict] = []
+    base = 1_000_000_000
+    iter_step = 100_000_000
+    for it in range(2, 6):
+        t = base + (it - 2) * iter_step
+        events.append(_compute_event(stage=0, iteration=it, microbatch=0,
+                                     phase="FORWARD", start_ns=t,
+                                     dur_ms=10.0, device="a10g_node0_gpu0"))
+        events.append(_compute_event(stage=0, iteration=it, microbatch=0,
+                                     phase="BACKWARD", start_ns=t + 30_000_000,
+                                     dur_ms=12.0, device="a10g_node0_gpu0"))
+        events.append(_compute_event(stage=1, iteration=it, microbatch=0,
+                                     phase="FORWARD", start_ns=t + 15_000_000,
+                                     dur_ms=20.0, device="a10g_node1_gpu0"))
+        events.append(_compute_event(stage=1, iteration=it, microbatch=0,
+                                     phase="BACKWARD", start_ns=t + 50_000_000,
+                                     dur_ms=18.0, device="a10g_node1_gpu0"))
+    _write_jsonl(trace_dir / "rank0.jsonl", events)
+
+    output = tmp_path / "stage_timings.yaml"
+    forward, backward, optimizer = derive_megatron_stats.write_stage_timings_overlay(
+        trace_dir, output
+    )
+    assert {fit.stage for fit in forward} == {0, 1}
+    assert {fit.stage for fit in backward} == {0, 1}
+    assert optimizer is None
+    by_stage = {fit.stage: fit for fit in backward}
+    assert by_stage[0].mean_ms == pytest.approx(12.0)
+    assert by_stage[1].mean_ms == pytest.approx(18.0)
+
+    overlay = yaml.safe_load(output.read_text())
+    stage0 = overlay["pipeline"]["stages"][0]
+    assert stage0["compute"]["distribution"]["mean"] == pytest.approx(10.0)
+    assert stage0["backward"]["distribution"]["mean"] == pytest.approx(12.0)
+
+
+def test_warmup_strip_drops_leading_outliers(tmp_path: Path) -> None:
+    from hops.megatron.importer import (
+        load_raw_megatron_events,
+        strip_warmup_iterations,
+    )
+
+    trace_dir = tmp_path / "megatron_trace"
+    events: list[dict] = []
+    # iter 0 is 5x slower than the rest -> warmup
+    base = 1_000_000_000
+    iter_dur = {0: 50.0, 1: 10.0, 2: 11.0, 3: 9.0, 4: 10.5}
+    for it, dur in iter_dur.items():
+        events.append(_compute_event(stage=0, iteration=it, microbatch=0,
+                                     phase="FORWARD",
+                                     start_ns=base + it * 200_000_000,
+                                     dur_ms=dur, device="d0"))
+    _write_jsonl(trace_dir / "rank0.jsonl", events)
+
+    loaded = load_raw_megatron_events(trace_dir, strip_warmup=False)
+    kept, dropped = strip_warmup_iterations(loaded)
+    assert dropped == [0]
+    assert {e.iteration for e in kept} == {1, 2, 3, 4}
+
+    auto_stripped = load_raw_megatron_events(trace_dir)
+    assert {e.iteration for e in auto_stripped} == {1, 2, 3, 4}
+
+
+def test_warmup_strip_preserves_clean_run(tmp_path: Path) -> None:
+    from hops.megatron.importer import strip_warmup_iterations, load_raw_megatron_events
+
+    trace_dir = tmp_path / "megatron_trace"
+    events: list[dict] = []
+    base = 1_000_000_000
+    for it, dur in enumerate([10.0, 11.0, 9.5, 10.5, 10.0]):
+        events.append(_compute_event(stage=0, iteration=it, microbatch=0,
+                                     phase="FORWARD",
+                                     start_ns=base + it * 200_000_000,
+                                     dur_ms=dur, device="d0"))
+    _write_jsonl(trace_dir / "rank0.jsonl", events)
+
+    loaded = load_raw_megatron_events(trace_dir, strip_warmup=False)
+    kept, dropped = strip_warmup_iterations(loaded)
+    assert dropped == []
+    assert len(kept) == len(loaded)
+
+
+def _compute_model_from_raw(raw: dict):
+    from hops.config import parse_config
+    from hops.runtime import build_runtime
+
+    config = parse_config(raw)
+    return build_runtime(config).pipeline.timing_model.compute_model
+
+
+def test_explicit_backward_overrides_backward_factor() -> None:
+    import numpy as np
+
+    from hops.core.types import Phase
+
+    raw = _base_config_dict()
+    raw["pipeline"]["precision"] = "fp32"
+    for stage_raw in raw["pipeline"]["stages"]:
+        stage_raw["compute"] = {"mode": "explicit",
+                                 "distribution": {"type": "constant", "value": 10.0}}
+        stage_raw["backward"] = {"distribution": {"type": "constant", "value": 5.0}}
+
+    model = _compute_model_from_raw(raw)
+    rng = np.random.default_rng(0)
+    # Without an explicit backward block, backward_factor=2.0 would yield 20.0;
+    # the per-stage backward distribution should win and yield 5.0.
+    assert model.sample(0, Phase.FORWARD, rng) == pytest.approx(10.0)
+    assert model.sample(0, Phase.BACKWARD, rng) == pytest.approx(5.0)
+
+
+def test_compute_model_falls_back_to_backward_factor_without_overlay() -> None:
+    import numpy as np
+
+    from hops.core.types import Phase
+
+    raw = _base_config_dict()
+    raw["pipeline"]["precision"] = "fp32"
+    for stage_raw in raw["pipeline"]["stages"]:
+        stage_raw["compute"] = {"mode": "explicit",
+                                 "distribution": {"type": "constant", "value": 10.0}}
+
+    model = _compute_model_from_raw(raw)
+    rng = np.random.default_rng(0)
+    assert model.sample(0, Phase.BACKWARD, rng) == pytest.approx(20.0)
+
+
+def test_fit_optimizer_distribution_pools_across_ranks(tmp_path: Path) -> None:
+    from hops.core.types import Phase
+    from hops.megatron.importer import load_raw_megatron_events
+
+    trace_dir = tmp_path / "megatron_trace"
+    events_rank0: list[dict] = []
+    events_rank1: list[dict] = []
+    base = 1_000_000_000
+    # Seed a forward event so the importer's warmup-strip has trailing data.
+    for it in range(2, 6):
+        t = base + (it - 2) * 200_000_000
+        events_rank0.append(_compute_event(stage=0, iteration=it, microbatch=0,
+                                           phase="FORWARD", start_ns=t,
+                                           dur_ms=10.0, device="d0"))
+        events_rank1.append(_compute_event(stage=1, iteration=it, microbatch=0,
+                                           phase="FORWARD", start_ns=t,
+                                           dur_ms=10.0, device="d1"))
+        events_rank0.append(_compute_event(stage=0, iteration=it, microbatch=None,
+                                           phase="OPTIMIZER",
+                                           start_ns=t + 100_000_000,
+                                           dur_ms=4.0, device="d0"))
+        events_rank1.append(_compute_event(stage=1, iteration=it, microbatch=None,
+                                           phase="OPTIMIZER",
+                                           start_ns=t + 100_000_000,
+                                           dur_ms=6.0, device="d1"))
+    _write_jsonl(trace_dir / "rank0.jsonl", events_rank0)
+    _write_jsonl(trace_dir / "rank1.jsonl", events_rank1)
+
+    loaded = load_raw_megatron_events(trace_dir, strip_warmup=False)
+    fit = derive_megatron_stats.fit_optimizer_distribution(loaded, phase=Phase.OPTIMIZER)
+    assert fit is not None
+    assert fit.count == 8
+    assert fit.mean_ms == pytest.approx(5.0)
+
+
+def test_write_stage_timings_overlay_emits_optimizer_overlay(tmp_path: Path) -> None:
+    trace_dir = tmp_path / "megatron_trace"
+    events: list[dict] = []
+    base = 1_000_000_000
+    for it in range(2, 6):
+        t = base + (it - 2) * 200_000_000
+        events.append(_compute_event(stage=0, iteration=it, microbatch=0,
+                                     phase="FORWARD", start_ns=t,
+                                     dur_ms=10.0, device="a10g_node0_gpu0"))
+        events.append(_compute_event(stage=1, iteration=it, microbatch=0,
+                                     phase="FORWARD", start_ns=t + 15_000_000,
+                                     dur_ms=20.0, device="a10g_node1_gpu0"))
+        events.append(_compute_event(stage=0, iteration=it, microbatch=None,
+                                     phase="OPTIMIZER",
+                                     start_ns=t + 100_000_000,
+                                     dur_ms=4.0, device="a10g_node0_gpu0"))
+        events.append(_compute_event(stage=1, iteration=it, microbatch=None,
+                                     phase="OPTIMIZER",
+                                     start_ns=t + 100_000_000,
+                                     dur_ms=6.0, device="a10g_node1_gpu0"))
+    _write_jsonl(trace_dir / "rank0.jsonl", events)
+
+    stage_output = tmp_path / "stage_timings.yaml"
+    optimizer_output = tmp_path / "optimizer.yaml"
+    forward, _backward, optimizer_fit = derive_megatron_stats.write_stage_timings_overlay(
+        trace_dir, stage_output, 0, optimizer_output
+    )
+    assert forward
+    assert optimizer_fit is not None
+    assert optimizer_fit.mean_ms == pytest.approx(5.0)
+
+    overlay = yaml.safe_load(optimizer_output.read_text())
+    assert overlay["optimizer"]["enabled"] is True
+    assert overlay["optimizer"]["update"]["type"] == "normal"
+    assert overlay["optimizer"]["update"]["mean"] == pytest.approx(5.0)
+
+
+def test_optimizer_overlay_merges_and_parses(tmp_path: Path) -> None:
+    base = _base_config_dict()
+    base_path = tmp_path / "hops.base.yaml"
+    base_path.write_text(yaml.safe_dump(base))
+
+    optimizer_overlay = tmp_path / "optimizer.yaml"
+    optimizer_overlay.write_text(yaml.safe_dump({
+        "optimizer": {
+            "enabled": True,
+            "update": {"type": "normal", "mean": 5.0, "std": 0.5},
+        }
+    }))
+
+    output_path = tmp_path / "merged.yaml"
+    materialize_hops_variant.materialize(base_path, [optimizer_overlay], output_path)
+
+    reloaded = yaml.safe_load(output_path.read_text())
+    config = parse_config(reloaded)
+    assert config.optimizer.enabled is True
+    assert config.optimizer.update_distribution["mean"] == pytest.approx(5.0)
+
+
+def test_write_stage_timings_overlay_skips_optimizer_when_absent(tmp_path: Path) -> None:
+    trace_dir = tmp_path / "megatron_trace"
+    events: list[dict] = []
+    base = 1_000_000_000
+    for it in range(2, 6):
+        t = base + (it - 2) * 200_000_000
+        events.append(_compute_event(stage=0, iteration=it, microbatch=0,
+                                     phase="FORWARD", start_ns=t,
+                                     dur_ms=10.0, device="d0"))
+    _write_jsonl(trace_dir / "rank0.jsonl", events)
+
+    stage_output = tmp_path / "stage_timings.yaml"
+    optimizer_output = tmp_path / "optimizer.yaml"
+    _forward, _backward, optimizer_fit = derive_megatron_stats.write_stage_timings_overlay(
+        trace_dir, stage_output, 0, optimizer_output
+    )
+    assert optimizer_fit is None
+    assert not optimizer_output.exists()

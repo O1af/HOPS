@@ -24,13 +24,16 @@ VARIANT_ORDER = ("no_lookahead", "link_calibrated", "trace_replay")
 VARIANT_DESCRIPTIONS = {
     "no_lookahead": "committed hops.base.yaml only; no run lookahead",
     "link_calibrated": "adds measured links; compute still analytical",
-    "trace_replay": "posthoc; stage compute fit from megatron_trace",
+    "trace_replay": "posthoc; stage compute (+ optimizer) fit from megatron_trace",
 }
 
 VARIANT_SOURCES = {
     "no_lookahead": "analytical tflop + default efficiency",
     "link_calibrated": "analytical tflop + default efficiency",
-    "trace_replay": "per-stage forward distribution fit from megatron_trace",
+    "trace_replay": (
+        "per-stage forward + backward distribution fit from megatron_trace; "
+        "optimizer step distribution pooled across ranks when OPTIMIZER events present"
+    ),
 }
 
 

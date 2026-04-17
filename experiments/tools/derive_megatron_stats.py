@@ -1,9 +1,13 @@
-"""Fit per-stage forward compute distributions from a Megatron trace dir.
+"""Fit per-stage compute distributions from a Megatron trace dir.
 
 Reads <job_dir>/megatron_trace/*.jsonl (as emitted by HOPS trace hooks inside
 Megatron-LM) and produces a pipeline.stages overlay with one explicit
-`compute` distribution per stage. Only forward-phase compute events are used;
-HOPS still applies `backward_factor` to derive backward times in the v1 flow.
+distribution per stage for the FORWARD phase and, when backward events are
+present, one explicit BACKWARD distribution per stage. When the backward
+overlay is provided, HOPS uses it directly and ignores `pipeline.backward_factor`.
+
+Warmup iterations are stripped from the trace by the importer using a
+3x-trailing-median heuristic; pass --min-iteration to override with a hard cut.
 
 Usage:
     uv run python experiments/tools/derive_megatron_stats.py \\
@@ -29,12 +33,12 @@ class StageFit:
     std_ms: float
 
 
-def fit_stage_distributions(events, forward_phase, min_iteration: int = 0) -> list[StageFit]:
+def fit_stage_distributions(events, phase, min_iteration: int = 0) -> list[StageFit]:
     per_stage: dict[int, list[float]] = {}
     for event in events:
         if event.event_type != "compute":
             continue
-        if event.phase != forward_phase:
+        if event.phase != phase:
             continue
         if event.iteration < min_iteration:
             continue
@@ -51,20 +55,66 @@ def fit_stage_distributions(events, forward_phase, min_iteration: int = 0) -> li
     return fits
 
 
-def build_overlay(fits: list[StageFit]) -> dict:
-    stages: list[dict] = []
-    for fit in fits:
-        stages.append({
-            "id": fit.stage,
-            "compute": {
-                "mode": "explicit",
-                "distribution": {
-                    "type": "normal",
-                    "mean": round(fit.mean_ms, 4),
-                    "std": round(fit.std_ms, 4),
-                },
+@dataclass(frozen=True)
+class OptimizerFit:
+    count: int
+    mean_ms: float
+    std_ms: float
+
+
+def fit_optimizer_distribution(events, phase, min_iteration: int = 0) -> OptimizerFit | None:
+    """Pool OPTIMIZER compute events across all ranks into one distribution.
+
+    HOPS samples one distribution per iteration for every device, so a single
+    pooled fit is sufficient even when per-rank means differ slightly.
+    """
+    samples: list[float] = []
+    for event in events:
+        if event.event_type != "compute":
+            continue
+        if event.phase != phase:
+            continue
+        if event.iteration < min_iteration:
+            continue
+        duration_ms = (event.end_wall_ns - event.start_wall_ns) / 1_000_000.0
+        samples.append(float(duration_ms))
+    if not samples:
+        return None
+    mean_ms = statistics.mean(samples)
+    std_ms = statistics.pstdev(samples) if len(samples) > 1 else 0.0
+    return OptimizerFit(count=len(samples), mean_ms=mean_ms, std_ms=std_ms)
+
+
+def build_optimizer_overlay(fit: OptimizerFit) -> dict:
+    return {
+        "optimizer": {
+            "enabled": True,
+            "update": {
+                "type": "normal",
+                "mean": round(fit.mean_ms, 4),
+                "std": round(fit.std_ms, 4),
             },
-        })
+        }
+    }
+
+
+def _normal_distribution(fit: StageFit) -> dict:
+    return {"type": "normal", "mean": round(fit.mean_ms, 4), "std": round(fit.std_ms, 4)}
+
+
+def build_overlay(forward_fits: list[StageFit],
+                  backward_fits: list[StageFit] | None = None) -> dict:
+    backward_by_stage = {fit.stage: fit for fit in (backward_fits or [])}
+    stages: list[dict] = []
+    for fit in forward_fits:
+        stage_entry: dict = {
+            "id": fit.stage,
+            "compute": {"mode": "explicit", "distribution": _normal_distribution(fit)},
+        }
+        bwd = backward_by_stage.get(fit.stage)
+        if bwd is not None:
+            stage_entry["backward"] = {"distribution": _normal_distribution(bwd)}
+        stages.append(stage_entry)
     return {"pipeline": {"stages": stages}}
 
 
@@ -72,25 +122,52 @@ def write_stage_timings_overlay(
     trace_dir: Path,
     output_path: Path,
     min_iteration: int = 0,
-) -> list[StageFit]:
+    optimizer_output_path: Path | None = None,
+) -> tuple[list[StageFit], list[StageFit], OptimizerFit | None]:
     ensure_hops_importable()
     from hops.core.types import Phase  # type: ignore[import-not-found]
     from hops.megatron.importer import load_raw_megatron_events  # type: ignore[import-not-found]
 
-    events = load_raw_megatron_events(trace_dir)
-    fits = fit_stage_distributions(
-        events, forward_phase=Phase.FORWARD, min_iteration=min_iteration
+    # When the caller pins min_iteration, take that as ground truth and skip
+    # the heuristic; otherwise let the importer strip warmup automatically.
+    strip = min_iteration == 0
+    events = load_raw_megatron_events(trace_dir, strip_warmup=strip)
+    forward_fits = fit_stage_distributions(
+        events, phase=Phase.FORWARD, min_iteration=min_iteration
     )
-    if not fits:
-        return []
+    if not forward_fits:
+        return [], [], None
+    backward_fits = fit_stage_distributions(
+        events, phase=Phase.BACKWARD, min_iteration=min_iteration
+    )
+    optimizer_fit = fit_optimizer_distribution(
+        events, phase=Phase.OPTIMIZER, min_iteration=min_iteration
+    )
 
+    backward_note = (
+        "Forward + BACKWARD compute events fit per stage; HOPS ignores backward_factor for these stages."
+        if backward_fits
+        else "FORWARD compute events only; backward times are derived via pipeline.backward_factor."
+    )
     banner = (
         "# GENERATED by experiments/tools/derive_megatron_stats.py. DO NOT EDIT.\n"
-        f"# Source: {trace_dir} (FORWARD compute events only).\n"
-        "# Backward times are still derived via pipeline.backward_factor in the base config.\n"
+        f"# Source: {trace_dir}.\n"
+        f"# {backward_note}\n"
     )
-    write_generated_yaml(output_path, banner, build_overlay(fits))
-    return fits
+    write_generated_yaml(output_path, banner, build_overlay(forward_fits, backward_fits))
+
+    if optimizer_output_path is not None and optimizer_fit is not None:
+        optimizer_banner = (
+            "# GENERATED by experiments/tools/derive_megatron_stats.py. DO NOT EDIT.\n"
+            f"# Source: {trace_dir} (OPTIMIZER compute events, pooled across ranks).\n"
+        )
+        write_generated_yaml(
+            optimizer_output_path,
+            optimizer_banner,
+            build_optimizer_overlay(optimizer_fit),
+        )
+
+    return forward_fits, backward_fits, optimizer_fit
 
 
 def _parse_args() -> argparse.Namespace:
@@ -101,9 +178,26 @@ def _parse_args() -> argparse.Namespace:
         "--min-iteration",
         type=int,
         default=0,
-        help="Skip events with iteration < this value (trace already drops warmup iters by default)",
+        help=(
+            "Skip events with iteration < this value. Defaults to 0, in which "
+            "case the importer's 3x-trailing-median heuristic strips warmup."
+        ),
+    )
+    parser.add_argument(
+        "--optimizer-output",
+        default=None,
+        help="If set, also write a fitted optimizer.yaml overlay to this path",
     )
     return parser.parse_args()
+
+
+def _format_fits(label: str, fits: list[StageFit]) -> str:
+    if not fits:
+        return f"{label}: none"
+    return label + ": " + ", ".join(
+        f"stage {f.stage} n={f.count} mean={f.mean_ms:.2f}ms std={f.std_ms:.2f}ms"
+        for f in fits
+    )
 
 
 def main() -> None:
@@ -114,15 +208,23 @@ def main() -> None:
         raise SystemExit(f"megatron_trace dir not found: {trace_dir}")
 
     output_path = Path(args.output)
-    fits = write_stage_timings_overlay(trace_dir, output_path, args.min_iteration)
-    if not fits:
+    optimizer_output = Path(args.optimizer_output) if args.optimizer_output else None
+    forward_fits, backward_fits, optimizer_fit = write_stage_timings_overlay(
+        trace_dir, output_path, args.min_iteration, optimizer_output
+    )
+    if not forward_fits:
         raise SystemExit("no FORWARD compute events found in trace")
 
-    summary = ", ".join(
-        f"stage {fit.stage}: n={fit.count}, mean={fit.mean_ms:.2f}ms, std={fit.std_ms:.2f}ms"
-        for fit in fits
-    )
-    print(f"wrote {len(fits)} stage fits -> {output_path} ({summary})")
+    print(f"wrote {len(forward_fits)} stage fits -> {output_path}")
+    print(_format_fits("forward", forward_fits))
+    print(_format_fits("backward", backward_fits))
+    if optimizer_fit is not None and optimizer_output is not None:
+        print(
+            f"optimizer: n={optimizer_fit.count} mean={optimizer_fit.mean_ms:.2f}ms "
+            f"std={optimizer_fit.std_ms:.2f}ms -> {optimizer_output}"
+        )
+    elif optimizer_output is not None:
+        print(f"optimizer: no OPTIMIZER events found in trace; {optimizer_output} not written")
 
 
 if __name__ == "__main__":
