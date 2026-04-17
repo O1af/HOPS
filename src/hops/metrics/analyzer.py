@@ -40,18 +40,10 @@ class MetricsAnalyzer:
         return intervals
 
     def trace_bounds(self) -> tuple[float, float]:
-        lo, hi = float("inf"), float("-inf")
-        for r in self.collector.computes:
-            if r.start_time < lo:
-                lo = r.start_time
-            if r.end_time > hi:
-                hi = r.end_time
-        for r in self.collector.transfers:
-            if r.start_time < lo:
-                lo = r.start_time
-            if r.end_time > hi:
-                hi = r.end_time
-        return (lo, hi) if lo != float("inf") else (0.0, 0.0)
+        records = self.collector.computes + self.collector.transfers
+        if not records:
+            return (0.0, 0.0)
+        return (min(r.start_time for r in records), max(r.end_time for r in records))
 
     def trace_duration(self) -> float:
         start, end = self.trace_bounds()

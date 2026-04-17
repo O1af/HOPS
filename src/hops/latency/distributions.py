@@ -1,9 +1,5 @@
 """Latency distributions for random sampling within HOPS."""
 
-import os
-
-RANDOM_SEED = 42
-
 from abc import ABC, abstractmethod
 
 import numpy as np

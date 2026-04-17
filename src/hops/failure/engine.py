@@ -103,9 +103,6 @@ class FailureEngine:
     def is_failed(self, device_id: str) -> bool:
         return device_id in self._failed_devices
 
-    def is_device_failed(self, device_id: str) -> bool:
-        return device_id in self._failed_devices
-
     def is_link_failed(self, src: str, dst: str) -> bool:
         return (src, dst) in self._failed_links
 

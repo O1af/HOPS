@@ -66,32 +66,21 @@ def _resolve_device(spec: DeviceSpec, overrides: dict[str, object], registry: Pr
 
 def _resolve_link_profiles(config: AppConfig, registry: PresetRegistry
                            ) -> tuple[dict[Locality, LinkProfile], dict[Locality, LocalityPenalty]]:
-    same_socket_name = config.hardware.interconnect.same_socket or config.hardware.interconnect.same_node
-    same_socket = registry.interconnect(same_socket_name)
-    same_node = registry.interconnect(config.hardware.interconnect.same_node)
-    cross_node = registry.interconnect(config.hardware.interconnect.cross_node)
+    interconnect = config.hardware.interconnect
+    presets = {
+        Locality.SAME_SOCKET: registry.interconnect(interconnect.same_socket or interconnect.same_node),
+        Locality.SAME_NODE: registry.interconnect(interconnect.same_node),
+        Locality.CROSS_NODE: registry.interconnect(interconnect.cross_node),
+    }
     profiles = {
-        Locality.SAME_SOCKET: LinkProfile(
-            bandwidth_gbps=same_socket.bandwidth_gbps,
-            base_latency_us=same_socket.latency_us,
-            jitter=Distribution.from_yaml(same_socket.jitter),
-        ),
-        Locality.SAME_NODE: LinkProfile(
-            bandwidth_gbps=same_node.bandwidth_gbps,
-            base_latency_us=same_node.latency_us,
-            jitter=Distribution.from_yaml(same_node.jitter),
-        ),
-        Locality.CROSS_NODE: LinkProfile(
-            bandwidth_gbps=cross_node.bandwidth_gbps,
-            base_latency_us=cross_node.latency_us,
-            jitter=Distribution.from_yaml(cross_node.jitter),
-        ),
+        locality: LinkProfile(
+            bandwidth_gbps=preset.bandwidth_gbps,
+            base_latency_us=preset.latency_us,
+            jitter=Distribution.from_yaml(preset.jitter),
+        )
+        for locality, preset in presets.items()
     }
-    penalties = {
-        Locality.SAME_SOCKET: same_socket.penalty,
-        Locality.SAME_NODE: same_node.penalty,
-        Locality.CROSS_NODE: cross_node.penalty,
-    }
+    penalties = {locality: preset.penalty for locality, preset in presets.items()}
     return profiles, penalties
 
 

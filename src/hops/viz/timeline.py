@@ -1,7 +1,5 @@
 """Gantt-style pipeline timeline plots."""
 
-import os
-
 import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
 
