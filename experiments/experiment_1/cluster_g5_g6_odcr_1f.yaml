@@ -2,6 +2,9 @@
 # - Head node: 1 x c6i.large
 # - g-hetero queue: 2 x g5.2xlarge + 2 x g6.4xlarge
 # - All compute nodes are in us-east-1f and target existing open ODCRs.
+# - Shared by experiment_1/* scenarios; subset selection happens in Slurm.
+# - G-family runs should force socket NCCL in run.slurm:
+#   NCCL_NET=Socket, NCCL_IB_DISABLE=1, NCCL_SOCKET_IFNAME=^lo,docker0.
 
 Region: us-east-1
 
