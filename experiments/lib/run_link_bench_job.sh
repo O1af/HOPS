@@ -83,7 +83,12 @@ for ((src = 0; src < ${#ORDERED_NODES[@]} - 1; src++)); do
     else
       node="$dst_node"
     fi
-    srun --nodes=1 --ntasks=1 -w "$node" bash "$OUTPUT_DIR/launch_link_bench.sh" "$idx" \
+    SRUN_ARGS=()
+    HET_GROUP=$(node_het_group "$node")
+    if [[ -n "$HET_GROUP" ]]; then
+      SRUN_ARGS+=("--het-group=$HET_GROUP")
+    fi
+    srun "${SRUN_ARGS[@]}" --nodes=1 --ntasks=1 -w "$node" bash "$OUTPUT_DIR/launch_link_bench.sh" "$idx" \
       >> "$out_file" 2>> "$OUTPUT_DIR/${pair_label}.err" &
     PIDS+=("$!")
   done

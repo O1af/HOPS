@@ -143,7 +143,12 @@ export TRAIN_ITERS
 PIDS=()
 for rank in "${!ORDERED_NODES[@]}"; do
   node=${ORDERED_NODES[$rank]}
-  srun --nodes=1 --ntasks=1 -w "$node" bash "$OUTPUT_DIR/launch_megatron.sh" "$rank" \
+  SRUN_ARGS=()
+  HET_GROUP=$(node_het_group "$node")
+  if [[ -n "$HET_GROUP" ]]; then
+    SRUN_ARGS+=("--het-group=$HET_GROUP")
+  fi
+  srun "${SRUN_ARGS[@]}" --nodes=1 --ntasks=1 -w "$node" bash "$OUTPUT_DIR/launch_megatron.sh" "$rank" \
     > "$OUTPUT_DIR/megatron_rank${rank}_${node}.log" 2>&1 &
   PIDS+=("$!")
 done

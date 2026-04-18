@@ -1,26 +1,56 @@
 #!/bin/bash
 
-collect_allocated_nodes() {
+load_allocated_nodes() {
   local found_het_group=0
   local idx var_name nodelist
+  local node
 
+  NODES=()
+  NODE_HET_GROUP_ENTRIES=()
   for idx in {0..31}; do
     var_name="SLURM_JOB_NODELIST_HET_GROUP_${idx}"
     nodelist="${!var_name:-}"
     if [[ -n "$nodelist" ]]; then
       found_het_group=1
-      scontrol show hostnames "$nodelist"
+      while IFS= read -r node; do
+        NODES+=("$node")
+        NODE_HET_GROUP_ENTRIES+=("$node=$idx")
+      done < <(scontrol show hostnames "$nodelist")
     fi
   done
 
   if [[ "$found_het_group" -eq 0 ]]; then
-    scontrol show hostnames "$SLURM_JOB_NODELIST"
+    while IFS= read -r node; do
+      NODES+=("$node")
+      NODE_HET_GROUP_ENTRIES+=("$node=")
+    done < <(scontrol show hostnames "$SLURM_JOB_NODELIST")
   fi
+}
+
+node_het_group() {
+  local node=$1
+  local entry
+
+  for entry in "${NODE_HET_GROUP_ENTRIES[@]:-}"; do
+    if [[ "$entry" == "$node="* ]]; then
+      echo "${entry#*=}"
+      return 0
+    fi
+  done
+
+  echo ""
 }
 
 gpu_name_for_node() {
   local node=$1
-  srun --nodes=1 --ntasks=1 -w "$node" bash -lc \
+  local het_group
+  local srun_args=()
+
+  het_group=$(node_het_group "$node")
+  if [[ -n "$het_group" ]]; then
+    srun_args+=("--het-group=$het_group")
+  fi
+  srun "${srun_args[@]}" --nodes=1 --ntasks=1 -w "$node" bash -lc \
     'nvidia-smi --query-gpu=name --format=csv,noheader | head -n 1'
 }
 
@@ -60,10 +90,7 @@ assign_ordered_nodes() {
     exit 1
   fi
 
-  NODES=()
-  while IFS= read -r node; do
-    NODES+=("$node")
-  done < <(collect_allocated_nodes)
+  load_allocated_nodes
   if [[ ${#NODES[@]} -ne "$stage_count" ]]; then
     echo "Expected exactly $stage_count allocated nodes, got ${#NODES[@]}" >&2
     printf 'nodes: %s\n' "${NODES[@]}" >&2
