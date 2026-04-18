@@ -172,6 +172,10 @@ def build_runtime(config: AppConfig, registry: PresetRegistry | None = None) -> 
     if config.optimizer.enabled and config.optimizer.update_distribution is not None:
         optimizer_latency = Distribution.from_yaml(config.optimizer.update_distribution)
 
+    iteration_barrier = None
+    if config.optimizer.iteration_barrier is not None:
+        iteration_barrier = Distribution.from_yaml(config.optimizer.iteration_barrier)
+
     pipeline = Pipeline(
         stages=stages,
         engine=engine,
@@ -187,6 +191,7 @@ def build_runtime(config: AppConfig, registry: PresetRegistry | None = None) -> 
         gradient_accumulation_steps=config.optimizer.accumulation_steps,
         precision=config.pipeline.precision,
         allreduce_algo=config.optimizer.allreduce_algorithm,
+        iteration_barrier=iteration_barrier,
     )
 
     if config.failure.enabled:

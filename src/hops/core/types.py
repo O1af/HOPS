@@ -14,6 +14,7 @@ class EventKind(Enum):
     ALLREDUCE_END = auto()
     OPTIMIZER_START = auto()
     OPTIMIZER_END = auto()
+    BATCH_START = auto()
     FAILURE = auto()
     RECOVERY = auto()
 

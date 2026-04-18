@@ -95,9 +95,10 @@ def test_parse_link_bench_derives_bidirectional_overrides(tmp_path: Path) -> Non
     assert len(measurements) == 1
     m = measurements[0]
     assert (m.stage_src, m.stage_dst) == (0, 1)
-    # 64 MiB * 8 / 54.237 ms ≈ 9.44 Gbps
-    assert m.bandwidth_gbps == pytest.approx(9.44, abs=0.05)
-    assert m.latency_us == pytest.approx(500.0)
+    # OLS fit across (1mb, 0.5ms) and (64mb, 54.237ms): slope ≈ 0.853 ms/MB
+    # => bandwidth = 8 / 0.853 ≈ 9.38 Gbps. Intercept clamps to 0 latency.
+    assert m.bandwidth_gbps == pytest.approx(9.38, abs=0.05)
+    assert m.latency_us == pytest.approx(0.0, abs=1.0)
 
     document = parse_link_bench.build_overrides_yaml(
         measurements, parse_link_bench._stage_to_device(trace_map)
@@ -362,12 +363,14 @@ def test_derive_megatron_stats_emits_backward_overlay(tmp_path: Path) -> None:
     _write_jsonl(trace_dir / "rank0.jsonl", events)
 
     output = tmp_path / "stage_timings.yaml"
-    forward, backward, optimizer = derive_megatron_stats.write_stage_timings_overlay(
+    forward, backward, optimizer, barrier = derive_megatron_stats.write_stage_timings_overlay(
         trace_dir, output
     )
     assert {fit.stage for fit in forward} == {0, 1}
     assert {fit.stage for fit in backward} == {0, 1}
     assert optimizer is None
+    # Barrier fit runs whenever multiple iterations are present; not asserted here.
+    _ = barrier
     by_stage = {fit.stage: fit for fit in backward}
     assert by_stage[0].mean_ms == pytest.approx(12.0)
     assert by_stage[1].mean_ms == pytest.approx(18.0)
@@ -527,7 +530,7 @@ def test_write_stage_timings_overlay_emits_optimizer_overlay(tmp_path: Path) -> 
 
     stage_output = tmp_path / "stage_timings.yaml"
     optimizer_output = tmp_path / "optimizer.yaml"
-    forward, _backward, optimizer_fit = derive_megatron_stats.write_stage_timings_overlay(
+    forward, _backward, optimizer_fit, _barrier = derive_megatron_stats.write_stage_timings_overlay(
         trace_dir, stage_output, 0, optimizer_output
     )
     assert forward
@@ -575,8 +578,178 @@ def test_write_stage_timings_overlay_skips_optimizer_when_absent(tmp_path: Path)
 
     stage_output = tmp_path / "stage_timings.yaml"
     optimizer_output = tmp_path / "optimizer.yaml"
-    _forward, _backward, optimizer_fit = derive_megatron_stats.write_stage_timings_overlay(
+    _forward, _backward, optimizer_fit, _barrier = derive_megatron_stats.write_stage_timings_overlay(
         trace_dir, stage_output, 0, optimizer_output
     )
     assert optimizer_fit is None
     assert not optimizer_output.exists()
+
+
+def test_fit_iteration_barrier_measures_interiter_gap(tmp_path: Path) -> None:
+    from hops.megatron.importer import load_raw_megatron_events
+
+    trace_dir = tmp_path / "megatron_trace"
+    events: list[dict] = []
+    # Three iterations; each takes 10ms and sits 40ms apart => 30ms gap.
+    # Fourth is an outlier warmup-like iteration (50ms dur); include to test pooling.
+    schedule = [
+        (2, 0, 10.0),
+        (3, 40_000_000, 10.0),
+        (4, 80_000_000, 10.0),
+        (5, 120_000_000, 10.0),
+    ]
+    base = 1_000_000_000
+    for it, offset, dur in schedule:
+        events.append(_compute_event(stage=0, iteration=it, microbatch=0,
+                                     phase="FORWARD", start_ns=base + offset,
+                                     dur_ms=dur, device="d0"))
+    _write_jsonl(trace_dir / "rank0.jsonl", events)
+
+    loaded = load_raw_megatron_events(trace_dir, strip_warmup=False)
+    fit = derive_megatron_stats.fit_iteration_barrier(loaded)
+    assert fit is not None
+    assert fit.count == 3  # 3 adjacent gaps among 4 iterations
+    assert fit.mean_ms == pytest.approx(30.0)
+    assert fit.std_ms == pytest.approx(0.0, abs=1e-6)
+
+    overlay = derive_megatron_stats.build_iteration_barrier_overlay(fit)
+    assert overlay["optimizer"]["iteration_barrier"]["type"] == "normal"
+    assert overlay["optimizer"]["iteration_barrier"]["mean"] == pytest.approx(30.0)
+
+
+def test_fit_iteration_barrier_skips_negative_gaps() -> None:
+    # A synthetic sequence of events where iteration 3 starts BEFORE iteration 2 ends
+    # (overlap). The barrier fit must drop that gap.
+    from hops.core.types import Phase
+    from hops.megatron.importer import RawMegatronEvent
+
+    def ev(it, start_ns, dur_ms):
+        return RawMegatronEvent(
+            rank=0, stage=0, iteration=it, microbatch=0,
+            event_type="compute", phase=Phase.FORWARD,
+            start_wall_ns=start_ns,
+            end_wall_ns=start_ns + int(dur_ms * 1_000_000),
+            device_id="d0",
+        )
+
+    events = [
+        ev(2, 0, 10.0),
+        ev(3, 5_000_000, 10.0),      # overlapping -> skipped
+        ev(4, 40_000_000, 10.0),     # 25ms after end of it=3
+    ]
+    fit = derive_megatron_stats.fit_iteration_barrier(events)
+    assert fit is not None
+    assert fit.count == 1
+    assert fit.mean_ms == pytest.approx(25.0)
+
+
+def test_write_stage_timings_overlay_emits_barrier_overlay(tmp_path: Path) -> None:
+    trace_dir = tmp_path / "megatron_trace"
+    events: list[dict] = []
+    base = 1_000_000_000
+    # 4 iterations, each 10ms, spaced 40ms apart => 30ms barrier.
+    for i, it in enumerate(range(2, 6)):
+        t = base + i * 40_000_000
+        events.append(_compute_event(stage=0, iteration=it, microbatch=0,
+                                     phase="FORWARD", start_ns=t,
+                                     dur_ms=10.0, device="d0"))
+    _write_jsonl(trace_dir / "rank0.jsonl", events)
+
+    stage_output = tmp_path / "stage_timings.yaml"
+    barrier_output = tmp_path / "iteration_barrier.yaml"
+    forward, _backward, _optimizer, barrier = derive_megatron_stats.write_stage_timings_overlay(
+        trace_dir, stage_output, 0, None, barrier_output
+    )
+    assert forward
+    assert barrier is not None
+    assert barrier.mean_ms == pytest.approx(30.0)
+
+    overlay = yaml.safe_load(barrier_output.read_text())
+    assert overlay["optimizer"]["iteration_barrier"]["mean"] == pytest.approx(30.0)
+
+
+def test_iteration_barrier_overlay_merges_and_parses(tmp_path: Path) -> None:
+    base = _base_config_dict()
+    base_path = tmp_path / "hops.base.yaml"
+    base_path.write_text(yaml.safe_dump(base))
+
+    barrier_overlay = tmp_path / "iteration_barrier.yaml"
+    barrier_overlay.write_text(yaml.safe_dump({
+        "optimizer": {
+            "iteration_barrier": {"type": "normal", "mean": 30.0, "std": 2.0},
+        }
+    }))
+
+    output_path = tmp_path / "merged.yaml"
+    materialize_hops_variant.materialize(base_path, [barrier_overlay], output_path)
+
+    reloaded = yaml.safe_load(output_path.read_text())
+    config = parse_config(reloaded)
+    # optimizer.enabled is still False but iteration_barrier is retained.
+    assert config.optimizer.enabled is False
+    assert config.optimizer.iteration_barrier is not None
+    assert config.optimizer.iteration_barrier["mean"] == pytest.approx(30.0)
+
+
+def test_parse_link_bench_ols_fit_recovers_latency_and_bandwidth(tmp_path: Path) -> None:
+    # Synthesize p50_ms = 2.0 ms latency + size_mb * (8 / 80.0) bandwidth=80 Gbps
+    # across 4 sizes. OLS should recover within <5%.
+    input_dir = tmp_path / "link_bench"
+    rows_out: list[dict] = []
+    latency_ms = 2.0
+    bw_gbps = 80.0
+    for size in [1, 4, 16, 64]:
+        p50 = latency_ms + size * (8.0 / bw_gbps)
+        for rank in (0, 1):
+            rows_out.append({
+                "label": "pair_0_1", "mode": "p2p", "rank": rank, "world_size": 2,
+                "hostname": f"node{rank}", "size_mb": size, "dtype": "bfloat16",
+                "local_rank": 0, "warmup": 0, "iters": 1,
+                "mean_ms": p50, "p50_ms": p50, "p99_ms": p50,
+                "min_ms": p50, "max_ms": p50, "std_ms": 0.0,
+            })
+    _write_jsonl(input_dir / "pair_0_1.jsonl", rows_out)
+
+    rows = parse_link_bench._iter_jsonl_rows(sorted(input_dir.glob("*.jsonl")))
+    measurements = parse_link_bench.derive_pair_measurements(rows)
+    assert len(measurements) == 1
+    m = measurements[0]
+    assert m.bandwidth_gbps == pytest.approx(80.0, rel=0.05)
+    assert m.latency_us == pytest.approx(2000.0, rel=0.05)
+
+
+def test_spearman_rho_perfect_and_reversed() -> None:
+    assert compare_run._spearman_rho([1.0, 2.0, 3.0], [10.0, 20.0, 30.0]) == pytest.approx(1.0)
+    assert compare_run._spearman_rho([1.0, 2.0, 3.0], [30.0, 20.0, 10.0]) == pytest.approx(-1.0)
+    # Degenerate inputs -> None
+    assert compare_run._spearman_rho([1.0, 1.0], [1.0, 2.0]) is None
+    assert compare_run._spearman_rho([1.0], [1.0]) is None
+
+
+def test_compare_run_report_includes_bubble_and_util_deltas(tmp_path: Path) -> None:
+    job_dir = tmp_path / "output" / "55"
+    derived = job_dir / "derived"
+    derived.mkdir(parents=True)
+
+    def summary_with_utils(per_s: float, bubble: float, utils: dict[str, float]) -> dict:
+        s = _fake_summary(per_s=per_s, mean_ms=40.0, bubble=bubble)
+        s["utilization"]["per_stage"] = utils
+        return s
+
+    (job_dir / "megatron_summary.json").write_text(json.dumps(
+        summary_with_utils(25.0, 0.80, {"0": 0.50, "1": 0.30, "2": 0.12, "3": 0.90})
+    ))
+    (derived / "hops_link_calibrated_summary.json").write_text(json.dumps(
+        summary_with_utils(28.0, 0.58, {"0": 0.70, "1": 0.50, "2": 0.64, "3": 0.95})
+    ))
+
+    comparison_path, report_path = compare_run.run(job_dir, links_source="test")
+    document = json.loads(comparison_path.read_text())
+    variant = document["variants"]["link_calibrated"]
+    assert variant["bubble_pp_delta"] == pytest.approx((0.58 - 0.80) * 100.0, abs=0.01)
+    assert variant["util_spearman_rho"] is not None
+    assert variant["per_stage_util"] is not None
+
+    report = report_path.read_text()
+    assert "Spearman" in report or "spearman" in report.lower()
+    assert "bubble" in report.lower()

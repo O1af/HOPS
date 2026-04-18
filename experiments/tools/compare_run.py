@@ -23,13 +23,23 @@ VARIANT_ORDER = ("no_lookahead", "link_calibrated", "trace_replay")
 
 VARIANT_DESCRIPTIONS = {
     "no_lookahead": "committed hops.base.yaml only; no run lookahead",
-    "link_calibrated": "adds measured links; compute still analytical",
-    "trace_replay": "posthoc; stage compute (+ optimizer) fit from megatron_trace",
+    "link_calibrated": (
+        "adds measured links + framework-level overlays (iteration_barrier, "
+        "optimizer kernel distribution). Compute still analytical. Overlays are "
+        "cluster/framework properties reusable across model shapes."
+    ),
+    "trace_replay": (
+        "posthoc diagnostic; adds per-stage compute distribution from this "
+        "run's megatron_trace on top of link_calibrated. Overfit by construction."
+    ),
 }
 
 VARIANT_SOURCES = {
     "no_lookahead": "analytical tflop + default efficiency",
-    "link_calibrated": "analytical tflop + default efficiency",
+    "link_calibrated": (
+        "analytical tflop + default efficiency; framework-level iteration_barrier "
+        "and optimizer kernel distribution fit from trace"
+    ),
     "trace_replay": (
         "per-stage forward + backward distribution fit from megatron_trace; "
         "optimizer step distribution pooled across ranks when OPTIMIZER events present"
@@ -84,16 +94,114 @@ def _summary_scalar(summary: dict, *keys: str) -> float | None:
     return None
 
 
+def _spearman_rho(xs: list[float], ys: list[float]) -> float | None:
+    """Rank correlation of two equal-length sequences. Returns None if degenerate."""
+    if len(xs) != len(ys) or len(xs) < 2:
+        return None
+
+    def _ranks(values: list[float]) -> list[float]:
+        # Average ranks for ties. Ranks are 1-based.
+        order = sorted(range(len(values)), key=lambda i: values[i])
+        ranks = [0.0] * len(values)
+        i = 0
+        while i < len(order):
+            j = i
+            while j + 1 < len(order) and values[order[j + 1]] == values[order[i]]:
+                j += 1
+            avg_rank = (i + j) / 2.0 + 1.0
+            for k in range(i, j + 1):
+                ranks[order[k]] = avg_rank
+            i = j + 1
+        return ranks
+
+    rx = _ranks(xs)
+    ry = _ranks(ys)
+    n = len(xs)
+    mx = sum(rx) / n
+    my = sum(ry) / n
+    num = sum((rx[i] - mx) * (ry[i] - my) for i in range(n))
+    denom_x = sum((rx[i] - mx) ** 2 for i in range(n))
+    denom_y = sum((ry[i] - my) ** 2 for i in range(n))
+    if denom_x == 0 or denom_y == 0:
+        return None
+    return num / (denom_x * denom_y) ** 0.5
+
+
+def _per_stage_util_arrays(comparison: dict) -> tuple[list[str], list[float], list[float]] | None:
+    per_stage = comparison.get("utilization", {}).get("per_stage")
+    if not isinstance(per_stage, dict) or not per_stage:
+        return None
+    keys = sorted(per_stage, key=lambda k: int(k))
+    mega = []
+    hops = []
+    for key in keys:
+        entry = per_stage[key]
+        m = entry.get("megatron")
+        h = entry.get("hops")
+        if m is None or h is None:
+            return None
+        mega.append(float(m))
+        hops.append(float(h))
+    return keys, mega, hops
+
+
 def _variant_row(summary: dict, megatron: dict | None, build_comparison) -> dict:
     hops_throughput = _summary_scalar(summary, "throughput", "per_s")
     megatron_throughput = _summary_scalar(megatron, "throughput", "per_s") if megatron else None
+    comparison = build_comparison(megatron, summary) if megatron is not None else None
+
+    bubble_delta = None
+    bubble_pp_delta = None
+    comm_overhead_delta = None
+    util_spearman_rho = None
+    per_stage_util = None
+    util_max_abs_delta = None
+    if comparison is not None:
+        bubble = comparison.get("bubble_ratio", {})
+        # Report (sim - real) so the sign matches the reader's intuition:
+        # positive = HOPS over-predicts idleness, negative = HOPS under-predicts.
+        mega_b = bubble.get("megatron")
+        hops_b = bubble.get("hops")
+        if mega_b is not None and hops_b is not None:
+            bubble_delta = hops_b - mega_b
+            bubble_pp_delta = bubble_delta * 100.0
+        comm = comparison.get("communication_overhead_ratio", {})
+        mega_c = comm.get("megatron")
+        hops_c = comm.get("hops")
+        if mega_c is not None and hops_c is not None:
+            comm_overhead_delta = hops_c - mega_c
+
+        arrays = _per_stage_util_arrays(comparison)
+        if arrays is not None:
+            keys, mega_u, hops_u = arrays
+            util_spearman_rho = _spearman_rho(mega_u, hops_u)
+            per_stage_util = [
+                {
+                    "stage": key,
+                    "megatron": mega_u[i],
+                    "hops": hops_u[i],
+                    "delta": hops_u[i] - mega_u[i],
+                }
+                for i, key in enumerate(keys)
+            ]
+            util_max_abs_delta = max(
+                abs(hops_u[i] - mega_u[i]) for i in range(len(keys))
+            )
+
     return {
         "summary": summary,
-        "comparison": build_comparison(megatron, summary) if megatron is not None else None,
+        "comparison": comparison,
         "throughput_per_s": hops_throughput,
         "throughput_error_pct": _pct_delta(megatron_throughput, hops_throughput),
         "latency_mean_ms": _summary_scalar(summary, "latency_ms", "mean_ms"),
         "bubble_ratio": _summary_scalar(summary, "bubble_ratio"),
+        "bubble_delta": bubble_delta,
+        "bubble_pp_delta": bubble_pp_delta,
+        "comm_overhead_ratio": _summary_scalar(summary, "time_ms", "communication_overhead_ratio"),
+        "comm_overhead_delta": comm_overhead_delta,
+        "util_spearman_rho": util_spearman_rho,
+        "util_max_abs_delta": util_max_abs_delta,
+        "per_stage_util": per_stage_util,
     }
 
 
@@ -159,20 +267,48 @@ def build_markdown_report(document: dict) -> str:
 
     lines.append("## HOPS variants")
     lines.append("")
-    lines.append("| variant | throughput_per_s | error vs megatron (%) | latency_mean_ms | bubble_ratio |")
-    lines.append("| --- | --- | --- | --- | --- |")
+    lines.append(
+        "| variant | throughput_per_s | throughput error (%) | "
+        "bubble_ratio | bubble Δ (pp, sim−real) | "
+        "comm_overhead Δ (sim−real) | util max |Δ| | util Spearman ρ |"
+    )
+    lines.append(
+        "| --- | --- | --- | --- | --- | --- | --- | --- |"
+    )
     for name in VARIANT_ORDER:
         row = variants.get(name, {"status": "missing"})
         if row.get("status") == "missing":
-            lines.append(f"| {name} | missing | — | — | — |")
+            lines.append(f"| {name} | missing | — | — | — | — | — | — |")
             continue
         lines.append(
             f"| {name} | {format_number(row.get('throughput_per_s'))} | "
             f"{format_number(row.get('throughput_error_pct'))} | "
-            f"{format_number(row.get('latency_mean_ms'))} | "
-            f"{format_number(row.get('bubble_ratio'))} |"
+            f"{format_number(row.get('bubble_ratio'))} | "
+            f"{format_number(row.get('bubble_pp_delta'))} | "
+            f"{format_number(row.get('comm_overhead_delta'), '.4f')} | "
+            f"{format_number(row.get('util_max_abs_delta'), '.4f')} | "
+            f"{format_number(row.get('util_spearman_rho'))} |"
         )
     lines.append("")
+
+    # Per-stage util table(s) — show the shape of the error, not just the scalar.
+    for name in VARIANT_ORDER:
+        row = variants.get(name, {})
+        per_stage = row.get("per_stage_util") if isinstance(row, dict) else None
+        if not per_stage:
+            continue
+        lines.append(f"### {name} — per-stage utilization")
+        lines.append("")
+        lines.append("| stage | real | sim | Δ (sim−real) |")
+        lines.append("| --- | --- | --- | --- |")
+        for entry in per_stage:
+            lines.append(
+                f"| {entry['stage']} | "
+                f"{format_number(entry['megatron'])} | "
+                f"{format_number(entry['hops'])} | "
+                f"{format_number(entry['delta'])} |"
+            )
+        lines.append("")
 
     manifest = document["calibration_manifest"]
     lines.append("## Calibration used")

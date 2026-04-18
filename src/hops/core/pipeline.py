@@ -47,7 +47,8 @@ class Pipeline:
                  stage_memory_mb: dict[int, float] | None = None,
                  gradient_accumulation_steps: int = 1,
                  precision: Precision = Precision.FP32,
-                 allreduce_algo: AllreduceAlgo = AllreduceAlgo.NAIVE):
+                 allreduce_algo: AllreduceAlgo = AllreduceAlgo.NAIVE,
+                 iteration_barrier: Distribution | None = None):
         self._validate_stage_configuration(stages)
         self.stages = {s.id: s for s in stages}
         self.stage_order = [s.id for s in stages]
@@ -69,6 +70,11 @@ class Pipeline:
         self.optimizer_latency = optimizer_latency
         self.gradient_accumulation_steps = gradient_accumulation_steps
         self.allreduce_algo = allreduce_algo
+        # Per-iteration host/framework stall, applied before every batch except
+        # the first. Models dataloader + CPU-side optimizer.step + CUDA launch
+        # gaps that CUDA-event traces miss. See status.md / plan.
+        self.iteration_barrier = iteration_barrier
+        self._batches_started = 0
 
         # ZeroBubble W-split detection via scheduler attribute
         self._use_w_split = scheduler.uses_w_split
@@ -102,6 +108,7 @@ class Pipeline:
         engine.on(EventKind.ALLREDUCE_END, self._on_allreduce_end)
         engine.on(EventKind.OPTIMIZER_START, self._on_optimizer_start)
         engine.on(EventKind.OPTIMIZER_END, self._on_optimizer_end)
+        engine.on(EventKind.BATCH_START, self._on_batch_start)
 
     @staticmethod
     def _validate_stage_configuration(stages: list[Stage]) -> None:
@@ -171,6 +178,21 @@ class Pipeline:
             and self._batch.accumulation_count >= self.gradient_accumulation_steps
         )
 
+        barrier_delay = 0.0
+        if self.iteration_barrier is not None and self._batches_started > 0:
+            barrier_delay = max(0.0, self.iteration_barrier.sample(self.rng))
+        self._batches_started += 1
+
+        if barrier_delay > 0.0:
+            self.engine.schedule(Event(
+                time=self.engine.now + barrier_delay,
+                kind=EventKind.BATCH_START,
+                payload={},
+            ))
+        else:
+            self._issue_ready_tasks()
+
+    def _on_batch_start(self, event: Event, engine: EventEngine) -> None:
         self._issue_ready_tasks()
 
     @property

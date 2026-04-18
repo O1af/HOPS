@@ -134,6 +134,10 @@ class OptimizerConfig:
     accumulation_steps: int = 1
     allreduce_algorithm: AllreduceAlgo = AllreduceAlgo.NAIVE
     update_distribution: dict | None = None
+    # Host/framework stall between iterations (dataloader, CPU-side optimizer.step,
+    # CUDA launch gaps). Calibrated once per cluster/framework version, not per
+    # model shape. Parameterized, not per-stage, so it does not introduce overfit.
+    iteration_barrier: dict | None = None
 
 
 @dataclass(frozen=True)
@@ -417,8 +421,12 @@ class ConfigParser:
         )
 
     def _parse_optimizer(self, raw: dict) -> OptimizerConfig:
+        iteration_barrier = raw.get("iteration_barrier")
+        if iteration_barrier is not None:
+            _require_distribution(iteration_barrier, "optimizer.iteration_barrier")
+
         if not raw.get("enabled", False):
-            return OptimizerConfig(enabled=False)
+            return OptimizerConfig(enabled=False, iteration_barrier=iteration_barrier)
 
         _require_non_negative(raw.get("gradient_mb", 0.0), "optimizer.gradient_mb")
         _require_positive(raw.get("accumulation_steps", 1), "optimizer.accumulation_steps")
@@ -430,6 +438,7 @@ class ConfigParser:
             accumulation_steps=raw.get("accumulation_steps", 1),
             allreduce_algorithm=AllreduceAlgo(algorithm),
             update_distribution=raw["update"],
+            iteration_barrier=iteration_barrier,
         )
 
     def _parse_failure(self, raw: dict) -> FailureConfig:
