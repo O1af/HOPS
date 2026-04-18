@@ -9,7 +9,7 @@ from hops.hardware.device import Device
 from hops.hardware.network import Link
 from hops.hardware.topology import Topology
 from hops.latency.compute_model import ComputeModel
-from hops.latency.distributions import Constant
+from hops.latency.distributions import Constant, Distribution
 from hops.metrics.collector import MetricsCollector
 
 
@@ -49,7 +49,8 @@ def make_canonical_config(*, batches: int = 1, microbatches: int = 1) -> dict:
 
 
 def make_test_pipeline(scheduler: Scheduler, *, num_stages: int = 4,
-                       compute_time: float = 5.0, seed: int = 42):
+                       compute_time: float = 5.0, seed: int = 42,
+                       iteration_barrier: Distribution | None = None):
     """Build a simple homogeneous pipeline for testing.
 
     Returns (engine, pipeline, collector).
@@ -69,5 +70,6 @@ def make_test_pipeline(scheduler: Scheduler, *, num_stages: int = 4,
 
     stages = [Stage(i, f"gpu{i}") for i in range(num_stages)]
     pipeline = Pipeline(stages, engine, topology, compute_model, scheduler,
-                        collector, activation_size_mb=0.0, rng=rng)
+                        collector, activation_size_mb=0.0, rng=rng,
+                        iteration_barrier=iteration_barrier)
     return engine, pipeline, collector

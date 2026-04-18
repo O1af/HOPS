@@ -14,7 +14,7 @@ from hops.core.types import AllreduceAlgo, Phase, Precision
 from hops.hardware.device import Device
 from hops.hardware.network import Link
 from hops.hardware.topology import LinkProfile, Locality, LocalityPenalty, Topology
-from hops.latency.compute_model import ComputeModel
+from hops.latency.compute_model import ComputeModel, DerivedLatency
 from hops.latency.distributions import Constant
 from hops.metrics.collector import MetricsCollector
 from hops.runtime import build_runtime
@@ -299,6 +299,40 @@ class TestOverlapAndContention:
 
         assert abs((end_time - start_time) - 1.5) < 1e-9
 
+    def test_explicit_link_override_skips_transfer_penalty(self):
+        rng = np.random.default_rng(0)
+        topology = Topology(
+            [
+                Device("n0_gpu0", "gpu", 8192, node_id="n0", socket_id="s0"),
+                Device("n1_gpu0", "gpu", 8192, node_id="n1", socket_id="s0"),
+                Device("n2_gpu0", "gpu", 8192, node_id="n2", socket_id="s0"),
+            ],
+            [Link("n0_gpu0", "n1_gpu0", bandwidth_gbps=800.0,
+                  base_latency_us=0.0, jitter=Constant(0.0))],
+            link_profiles={
+                Locality.CROSS_NODE: LinkProfile(800.0, 0.0, Constant(0.0)),
+            },
+            locality_penalties={
+                Locality.CROSS_NODE: LocalityPenalty(transfer_scale=1.5),
+            },
+        )
+        compute_model = ComputeModel({})
+
+        from hops.core.timing import TimingModel
+        tm = TimingModel(topology, compute_model, rng)
+
+        s1, e1 = tm.reserve_transfer(
+            now=0.0, src_device="n0_gpu0", dst_device="n1_gpu0", size_mb=100.0,
+        )
+        assert abs((e1 - s1) - 1.0) < 1e-9
+
+        tm.release_transfer("n0_gpu0", "n1_gpu0")
+
+        s2, e2 = tm.reserve_transfer(
+            now=0.0, src_device="n1_gpu0", dst_device="n2_gpu0", size_mb=100.0,
+        )
+        assert abs((e2 - s2) - 1.5) < 1e-9
+
 
 # ── Feature 6: Pipeline drain verification ───────────────────────────────
 
@@ -471,12 +505,18 @@ class TestMixedPrecision:
         assert device0.memory_used_mb == 1500  # 1000 * 1.5
 
     def test_precision_speedup_in_compute_model(self):
-        """Precision speedup should reduce compute time."""
+        """Precision speedup should reduce analytical compute time."""
         rng = np.random.default_rng(0)
-        dists = {0: Constant(10.0)}
-
-        model_fp32 = ComputeModel(dists, precision_speedup=1.0)
-        model_fp16 = ComputeModel(dists, precision_speedup=2.0)
+        model_fp32 = ComputeModel({0: DerivedLatency(
+            workload_tflop=1.0, device_flops=100.0,
+            memory_access_mb=0.0, memory_bandwidth_gbps=1.0,
+            compute_scale=1.0,
+        )})
+        model_fp16 = ComputeModel({0: DerivedLatency(
+            workload_tflop=1.0, device_flops=100.0,
+            memory_access_mb=0.0, memory_bandwidth_gbps=1.0,
+            compute_scale=1.0 / 2.0,
+        )})
 
         time_fp32 = model_fp32.sample(0, Phase.FORWARD, rng)
         time_fp16 = model_fp16.sample(0, Phase.FORWARD, rng)

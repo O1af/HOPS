@@ -7,9 +7,15 @@ three HOPS variants, runs each, and emits comparison.json + report.md under
 
 Variants:
   - no_lookahead:    base HOPS config only (copied from <job-dir>/hops_summary.json).
-  - link_calibrated: base + measured link_bench overrides.
-  - trace_replay:    base + link overrides + per-stage forward distribution fit
-                     from <job-dir>/megatron_trace/.
+  - link_calibrated: base + link overrides + framework-level overlays
+                     (iteration_barrier, optimizer kernel distribution) fit from
+                     the trace. These parameterize host/framework effects that
+                     transfer across model shapes on the same cluster, not the
+                     per-stage compute of this specific run, so link_calibrated
+                     remains a legitimate "predict before measure" variant.
+  - trace_replay:    link_calibrated + per-stage forward/backward distribution
+                     fit from <job-dir>/megatron_trace/. Diagnostic only; by
+                     construction overfit to the target trace.
 
 If link_bench results are not found, link_calibrated and trace_replay are
 skipped and the manifest records that.
@@ -118,25 +124,40 @@ def run(
     if not has_links:
         print(f"[warn] no link_bench data at {resolved_link_bench}; skipping link_calibrated and trace_replay")
 
-    if has_links:
-        link_cal_yaml = derived_dir / "hops.link_calibrated.yaml"
-        materialize(base_config, [links_overlay], link_cal_yaml)
-        _run_hops(link_cal_yaml, derived_dir / "hops_link_calibrated_summary.json")
-
     has_trace = False
     has_optimizer = False
+    has_barrier = False
     stage_timings_overlay = derived_dir / "stage_timings.yaml"
     optimizer_overlay = derived_dir / "optimizer.yaml"
+    iteration_barrier_overlay = derived_dir / "iteration_barrier.yaml"
     if has_links:
         trace_dir = job_dir / "megatron_trace"
         if trace_dir.is_dir() and any(trace_dir.glob("*.jsonl")):
-            forward_fits, _, optimizer_fit = write_stage_timings_overlay(
-                trace_dir, stage_timings_overlay, min_iteration, optimizer_overlay
+            forward_fits, _, optimizer_fit, barrier_fit = write_stage_timings_overlay(
+                trace_dir,
+                stage_timings_overlay,
+                min_iteration,
+                optimizer_overlay,
+                iteration_barrier_overlay,
             )
             has_trace = bool(forward_fits)
             has_optimizer = optimizer_fit is not None
+            has_barrier = barrier_fit is not None
+
+    if has_links:
+        link_cal_overlays = [links_overlay]
+        if has_barrier:
+            link_cal_overlays.append(iteration_barrier_overlay)
+        if has_optimizer:
+            link_cal_overlays.append(optimizer_overlay)
+        link_cal_yaml = derived_dir / "hops.link_calibrated.yaml"
+        materialize(base_config, link_cal_overlays, link_cal_yaml)
+        _run_hops(link_cal_yaml, derived_dir / "hops_link_calibrated_summary.json")
+
     if has_trace:
         overlays = [links_overlay, stage_timings_overlay]
+        if has_barrier:
+            overlays.append(iteration_barrier_overlay)
         if has_optimizer:
             overlays.append(optimizer_overlay)
         trace_yaml = derived_dir / "hops.trace_replay.yaml"

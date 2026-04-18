@@ -96,6 +96,8 @@ class Topology:
         return self.locality_penalty(Locality.SAME_SOCKET)
 
     def transfer_penalty(self, src: str, dst: str) -> LocalityPenalty:
+        if (src, dst) in self._links:
+            return LocalityPenalty()
         return self.locality_penalty(self.locality(src, dst))
 
     def link(self, src: str, dst: str) -> Link:

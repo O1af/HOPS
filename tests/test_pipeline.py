@@ -1,6 +1,7 @@
 """Tests for the pipeline model."""
 
 import numpy as np
+import pytest
 
 from hops.config import parse_config
 from hops.core.event_engine import EventEngine
@@ -178,6 +179,40 @@ def test_optimizer_step_adds_time():
     # Total time should be > fwd+bwd alone (30ms for 1MB, 2 stages, constant 5ms)
     makespan = collector.makespan()
     assert makespan > 30.0
+
+
+def test_iteration_barrier_defers_subsequent_batches():
+    """iteration_barrier must delay batches after the first by its sampled value."""
+    engine, pipeline, collector = make_test_pipeline(
+        GPipeScheduler(), num_stages=2, compute_time=5.0, seed=0,
+        iteration_barrier=Constant(50.0),
+    )
+
+    # First batch: fwd(5)+fwd(5)+bwd(10)+bwd(10) = 30ms; no barrier.
+    pipeline.start_batch(1)
+    engine.run(stop_condition=lambda: pipeline.batch_complete)
+    first_finish = collector.makespan()
+    assert first_finish == pytest.approx(30.0, abs=0.01)
+
+    pipeline.start_batch(1)
+    engine.run(stop_condition=lambda: pipeline.batch_complete)
+    second_batch_starts = [
+        r.start_time for r in collector.computes if r.start_time > first_finish + 1e-6
+    ]
+    assert second_batch_starts
+    assert min(second_batch_starts) == pytest.approx(first_finish + 50.0, abs=0.01)
+
+
+def test_iteration_barrier_skipped_on_first_batch():
+    """The first batch must not incur an iteration_barrier delay."""
+    engine, pipeline, collector = make_test_pipeline(
+        GPipeScheduler(), num_stages=2, compute_time=5.0, seed=0,
+        iteration_barrier=Constant(100.0),
+    )
+    pipeline.start_batch(1)
+    engine.run(stop_condition=lambda: pipeline.batch_complete)
+    first_compute = min(r.start_time for r in collector.computes)
+    assert first_compute == pytest.approx(0.0, abs=0.01)
 
 
 def test_optimizer_disabled_by_default():
