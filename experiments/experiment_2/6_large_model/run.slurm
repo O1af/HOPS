@@ -1,12 +1,8 @@
 #!/bin/bash
 # Submit from the ParallelCluster head node:
-#   sbatch experiments/experiment_2/1_all_nodes/run.slurm
-#
-# This is a Slurm heterogeneous job:
-# - het group 0: 4 G-family nodes from the g-hetero partition
-# - het group 1: 2 P5 nodes from the p5-cap Capacity Block partition
+#   sbatch experiments/experiment_2/6_large_model/run.slurm
 
-#SBATCH --job-name=exp2-1-all-6gpu
+#SBATCH --job-name=exp2-6-large
 #SBATCH --partition=g-hetero
 #SBATCH --nodes=4
 #SBATCH --ntasks=4
@@ -23,17 +19,17 @@
 
 set -euo pipefail
 
-SCENARIO_REL="experiments/experiment_2/1_all_nodes"
+SCENARIO_REL="experiments/experiment_2/6_large_model"
 source "$(cd "${SLURM_SUBMIT_DIR:-$(pwd)}" && pwd)/$SCENARIO_REL/scenario.env"
-MASTER_PORT="${MASTER_PORT:-29560}"
+MASTER_PORT="${MASTER_PORT:-29660}"
 export PIPELINE_PARALLEL_SIZE=6
-export NUM_LAYERS=12
-export HIDDEN_SIZE=1024
-export FFN_HIDDEN_SIZE=4096
-export NUM_ATTENTION_HEADS=8
-export SEQ_LENGTH=1024
+export NUM_LAYERS=18
+export HIDDEN_SIZE=1536
+export FFN_HIDDEN_SIZE=6144
+export NUM_ATTENTION_HEADS=12
+export SEQ_LENGTH=2048
 export MICRO_BATCH_SIZE=1
 export GLOBAL_BATCH_SIZE=6
-export TRAIN_ITERS=20
+export TRAIN_ITERS=15
 
 source "$(cd "${SLURM_SUBMIT_DIR:-$(pwd)}" && pwd)/experiments/lib/run_megatron_job.sh"

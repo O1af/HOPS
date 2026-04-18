@@ -1,12 +1,8 @@
 #!/bin/bash
 # Submit from the ParallelCluster head node:
-#   sbatch experiments/experiment_2/1_all_nodes/run.slurm
-#
-# This is a Slurm heterogeneous job:
-# - het group 0: 4 G-family nodes from the g-hetero partition
-# - het group 1: 2 P5 nodes from the p5-cap Capacity Block partition
+#   sbatch experiments/experiment_2/4_slow_middle/run.slurm
 
-#SBATCH --job-name=exp2-1-all-6gpu
+#SBATCH --job-name=exp2-4-slow-mid
 #SBATCH --partition=g-hetero
 #SBATCH --nodes=4
 #SBATCH --ntasks=4
@@ -23,9 +19,9 @@
 
 set -euo pipefail
 
-SCENARIO_REL="experiments/experiment_2/1_all_nodes"
+SCENARIO_REL="experiments/experiment_2/4_slow_middle"
 source "$(cd "${SLURM_SUBMIT_DIR:-$(pwd)}" && pwd)/$SCENARIO_REL/scenario.env"
-MASTER_PORT="${MASTER_PORT:-29560}"
+MASTER_PORT="${MASTER_PORT:-29620}"
 export PIPELINE_PARALLEL_SIZE=6
 export NUM_LAYERS=12
 export HIDDEN_SIZE=1024
