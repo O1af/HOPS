@@ -124,9 +124,6 @@ def run(
     if not has_links:
         print(f"[warn] no link_bench data at {resolved_link_bench}; skipping link_calibrated and trace_replay")
 
-    # Fit framework-level overlays (iteration_barrier, optimizer kernel dist)
-    # before materializing link_calibrated, so they can be included there too.
-    # These are properties of the cluster/framework, not of this model shape.
     has_trace = False
     has_optimizer = False
     has_barrier = False

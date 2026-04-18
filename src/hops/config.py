@@ -134,9 +134,6 @@ class OptimizerConfig:
     accumulation_steps: int = 1
     allreduce_algorithm: AllreduceAlgo = AllreduceAlgo.NAIVE
     update_distribution: dict | None = None
-    # Host/framework stall between iterations (dataloader, CPU-side optimizer.step,
-    # CUDA launch gaps). Calibrated once per cluster/framework version, not per
-    # model shape. Parameterized, not per-stage, so it does not introduce overfit.
     iteration_barrier: dict | None = None
 
 

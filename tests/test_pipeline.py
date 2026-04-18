@@ -183,36 +183,19 @@ def test_optimizer_step_adds_time():
 
 def test_iteration_barrier_defers_subsequent_batches():
     """iteration_barrier must delay batches after the first by its sampled value."""
-    num_stages = 2
-    rng = np.random.default_rng(0)
-    devices = [Device(f"gpu{i}", "gpu", 8192) for i in range(num_stages)]
-    links = [
-        Link("gpu0", "gpu1", 900, 0.0, Constant(0.0)),
-        Link("gpu1", "gpu0", 900, 0.0, Constant(0.0)),
-    ]
-    topology = Topology(devices, links)
-    compute_model = ComputeModel({i: Constant(5.0) for i in range(num_stages)})
-    collector = MetricsCollector()
-    engine = EventEngine()
-    pipeline = Pipeline(
-        [Stage(i, f"gpu{i}") for i in range(num_stages)],
-        engine, topology, compute_model, GPipeScheduler(), collector,
-        activation_size_mb=0.0, rng=rng,
+    engine, pipeline, collector = make_test_pipeline(
+        GPipeScheduler(), num_stages=2, compute_time=5.0, seed=0,
         iteration_barrier=Constant(50.0),
     )
 
-    # First batch: starts at t=0, no barrier. 1 MB, 2 stages, compute 5ms, bwd_factor=2
-    # total = fwd(5)+fwd(5)+bwd(10)+bwd(10) = 30ms.
+    # First batch: fwd(5)+fwd(5)+bwd(10)+bwd(10) = 30ms; no barrier.
     pipeline.start_batch(1)
     engine.run(stop_condition=lambda: pipeline.batch_complete)
     first_finish = collector.makespan()
     assert first_finish == pytest.approx(30.0, abs=0.01)
 
-    # Second batch: barrier of 50ms should push earliest compute to >= first_finish + 50.
     pipeline.start_batch(1)
     engine.run(stop_condition=lambda: pipeline.batch_complete)
-
-    # The earliest NEW compute after the first batch must start at first_finish + 50.
     second_batch_starts = [
         r.start_time for r in collector.computes if r.start_time > first_finish + 1e-6
     ]
@@ -222,21 +205,8 @@ def test_iteration_barrier_defers_subsequent_batches():
 
 def test_iteration_barrier_skipped_on_first_batch():
     """The first batch must not incur an iteration_barrier delay."""
-    num_stages = 2
-    rng = np.random.default_rng(0)
-    devices = [Device(f"gpu{i}", "gpu", 8192) for i in range(num_stages)]
-    links = [
-        Link("gpu0", "gpu1", 900, 0.0, Constant(0.0)),
-        Link("gpu1", "gpu0", 900, 0.0, Constant(0.0)),
-    ]
-    topology = Topology(devices, links)
-    compute_model = ComputeModel({i: Constant(5.0) for i in range(num_stages)})
-    collector = MetricsCollector()
-    engine = EventEngine()
-    pipeline = Pipeline(
-        [Stage(i, f"gpu{i}") for i in range(num_stages)],
-        engine, topology, compute_model, GPipeScheduler(), collector,
-        activation_size_mb=0.0, rng=rng,
+    engine, pipeline, collector = make_test_pipeline(
+        GPipeScheduler(), num_stages=2, compute_time=5.0, seed=0,
         iteration_barrier=Constant(100.0),
     )
     pipeline.start_batch(1)

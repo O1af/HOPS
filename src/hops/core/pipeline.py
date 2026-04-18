@@ -70,11 +70,9 @@ class Pipeline:
         self.optimizer_latency = optimizer_latency
         self.gradient_accumulation_steps = gradient_accumulation_steps
         self.allreduce_algo = allreduce_algo
-        # Per-iteration host/framework stall, applied before every batch except
-        # the first. Models dataloader + CPU-side optimizer.step + CUDA launch
-        # gaps that CUDA-event traces miss. See status.md / plan.
+        # Host/framework stall applied before every batch except the first.
         self.iteration_barrier = iteration_barrier
-        self._batches_started = 0
+        self._first_batch_started = False
 
         # ZeroBubble W-split detection via scheduler attribute
         self._use_w_split = scheduler.uses_w_split
@@ -179,9 +177,9 @@ class Pipeline:
         )
 
         barrier_delay = 0.0
-        if self.iteration_barrier is not None and self._batches_started > 0:
+        if self.iteration_barrier is not None and self._first_batch_started:
             barrier_delay = max(0.0, self.iteration_barrier.sample(self.rng))
-        self._batches_started += 1
+        self._first_batch_started = True
 
         if barrier_delay > 0.0:
             self.engine.schedule(Event(

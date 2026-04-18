@@ -95,11 +95,8 @@ class Topology:
             return self.locality_penalty(locality)
         return self.locality_penalty(Locality.SAME_SOCKET)
 
-    def is_explicit_link(self, src: str, dst: str) -> bool:
-        return (src, dst) in self._links
-
     def transfer_penalty(self, src: str, dst: str) -> LocalityPenalty:
-        if self.is_explicit_link(src, dst):
+        if (src, dst) in self._links:
             return LocalityPenalty()
         return self.locality_penalty(self.locality(src, dst))
 
