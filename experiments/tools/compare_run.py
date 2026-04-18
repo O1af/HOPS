@@ -319,6 +319,11 @@ def build_markdown_report(document: dict) -> str:
         lines.append(f"    - {name}: {manifest['compute_source_per_variant'][name]}")
     lines.append("")
 
+    lines.append("> **Note on transfer\\_ms**: Megatron `transfer_ms` reflects host-side NCCL")
+    lines.append("> dispatch time (async enqueue). HOPS `transfer_ms` models full wire transfer")
+    lines.append("> duration. These metrics are not directly comparable. Use throughput and")
+    lines.append("> latency for accuracy assessment.")
+    lines.append("")
     lines.append("## Overfit guard")
     for name in VARIANT_ORDER:
         lines.append(f"- {name}: {document['overfit_guard'][name]}")

@@ -441,7 +441,6 @@ def test_explicit_backward_overrides_backward_factor() -> None:
     from hops.core.types import Phase
 
     raw = _base_config_dict()
-    raw["pipeline"]["precision"] = "fp32"
     for stage_raw in raw["pipeline"]["stages"]:
         stage_raw["compute"] = {"mode": "explicit",
                                  "distribution": {"type": "constant", "value": 10.0}}
@@ -461,7 +460,6 @@ def test_compute_model_falls_back_to_backward_factor_without_overlay() -> None:
     from hops.core.types import Phase
 
     raw = _base_config_dict()
-    raw["pipeline"]["precision"] = "fp32"
     for stage_raw in raw["pipeline"]["stages"]:
         stage_raw["compute"] = {"mode": "explicit",
                                  "distribution": {"type": "constant", "value": 10.0}}
@@ -753,3 +751,41 @@ def test_compare_run_report_includes_bubble_and_util_deltas(tmp_path: Path) -> N
     report = report_path.read_text()
     assert "Spearman" in report or "spearman" in report.lower()
     assert "bubble" in report.lower()
+
+
+def test_explicit_distribution_ignores_precision_speedup() -> None:
+    import numpy as np
+
+    from hops.core.types import Phase
+
+    raw = _base_config_dict()
+    raw["pipeline"]["precision"] = "bf16"
+    for stage_raw in raw["pipeline"]["stages"]:
+        stage_raw["compute"] = {"mode": "explicit",
+                                 "distribution": {"type": "constant", "value": 12.0}}
+
+    model = _compute_model_from_raw(raw)
+    rng = np.random.default_rng(0)
+    assert model.sample(0, Phase.FORWARD, rng) == pytest.approx(12.0)
+
+
+def test_analytical_stage_still_scales_with_precision() -> None:
+    import numpy as np
+
+    from hops.core.types import Phase
+
+    raw_bf16 = _base_config_dict()
+    raw_bf16["pipeline"]["precision"] = "bf16"
+    for s in raw_bf16["pipeline"]["stages"]:
+        s["compute"]["memory_mb"] = 0.0
+
+    raw_fp32 = _base_config_dict()
+    raw_fp32["pipeline"]["precision"] = "fp32"
+    for s in raw_fp32["pipeline"]["stages"]:
+        s["compute"]["memory_mb"] = 0.0
+
+    model_bf16 = _compute_model_from_raw(raw_bf16)
+    model_fp32 = _compute_model_from_raw(raw_fp32)
+    fwd_bf16 = model_bf16.sample(0, Phase.FORWARD, np.random.default_rng(0))
+    fwd_fp32 = model_fp32.sample(0, Phase.FORWARD, np.random.default_rng(0))
+    assert fwd_bf16 == pytest.approx(fwd_fp32 / 2.0, rel=0.01)

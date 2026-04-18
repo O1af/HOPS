@@ -67,13 +67,11 @@ class ComputeModel:
     def __init__(self, stage_models: dict[int, StageLatencySource],
                  backward_factor: float = 2.0,
                  backward_b_fraction: float = 0.5,
-                 precision_speedup: float = 1.0,
                  backward_models: dict[int, StageLatencySource] | None = None):
         self._models = stage_models
         self._backward_models = backward_models or {}
         self._backward_factor = backward_factor
         self._backward_b_fraction = backward_b_fraction
-        self._precision_speedup = precision_speedup
 
     def sample(self, stage_id: int, phase: Phase, rng: np.random.Generator) -> float:
         if phase in (Phase.BACKWARD, Phase.BACKWARD_B, Phase.BACKWARD_W) \
@@ -91,12 +89,11 @@ class ComputeModel:
                 base *= self._backward_factor * self._backward_b_fraction
             elif phase == Phase.BACKWARD_W:
                 base *= self._backward_factor * (1.0 - self._backward_b_fraction)
-        if self._precision_speedup != 1.0:
-            base /= self._precision_speedup
         return base
 
     @staticmethod
-    def _stage_model_from_config(stage: StageConfig, topology: Topology) -> StageLatencySource:
+    def _stage_model_from_config(stage: StageConfig, topology: Topology,
+                                 precision_speedup: float = 1.0) -> StageLatencySource:
         penalty = topology.stage_locality_penalty(
             device_id=stage.device,
             memory_placement=stage.memory_placement,
@@ -126,7 +123,7 @@ class ComputeModel:
             memory_bandwidth_gbps=memory_bandwidth or float("inf"),
             efficiency=stage.analytical.efficiency_compute,
             memory_efficiency=stage.analytical.efficiency_memory,
-            compute_scale=penalty.compute_scale,
+            compute_scale=penalty.compute_scale / precision_speedup,
             memory_bandwidth_scale=penalty.memory_bandwidth_scale,
             memory_latency_us=penalty.memory_latency_us,
             latency_scale=1.0,
@@ -136,10 +133,13 @@ class ComputeModel:
     @classmethod
     def from_pipeline_config(cls, pipeline: PipelineConfig,
                              topology: Topology) -> "ComputeModel":
+        precision_speedup = pipeline.precision.compute_speedup
         stage_models: dict[int, StageLatencySource] = {}
         backward_models: dict[int, StageLatencySource] = {}
         for stage in pipeline.stages:
-            stage_models[stage.id] = cls._stage_model_from_config(stage, topology)
+            stage_models[stage.id] = cls._stage_model_from_config(
+                stage, topology, precision_speedup=precision_speedup,
+            )
             if stage.backward is not None:
                 backward_models[stage.id] = DistributionLatency(
                     Distribution.from_yaml(stage.backward.distribution)
@@ -148,6 +148,5 @@ class ComputeModel:
             stage_models,
             backward_factor=pipeline.backward_factor,
             backward_b_fraction=pipeline.backward_split.activation_grad_fraction,
-            precision_speedup=pipeline.precision.compute_speedup,
             backward_models=backward_models,
         )
