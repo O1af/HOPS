@@ -13,6 +13,9 @@ class DevicePreset:
     flops_tflops: float
     memory_mb: float
     memory_bandwidth_gbps: float
+    # Per-invocation overhead (kernel launch + Python/CUDA glue). Dominates
+    # sub-ms kernels on modern GPUs where the FLOP-budget estimate underfits.
+    launch_overhead_ms: float = 1.5
 
 
 @dataclass(frozen=True)

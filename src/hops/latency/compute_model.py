@@ -122,6 +122,11 @@ class ComputeModel:
                 "does not define a positive memory bandwidth value"
             )
 
+        launch_overhead_ms = (
+            device.launch_overhead_ms
+            if device.launch_overhead_ms is not None
+            else DEFAULT_LAUNCH_OVERHEAD_MS
+        )
         return DerivedLatency(
             workload_tflop=stage.analytical.tflop,
             device_flops=device.flops,
@@ -133,6 +138,7 @@ class ComputeModel:
             memory_bandwidth_scale=penalty.memory_bandwidth_scale,
             memory_latency_us=penalty.memory_latency_us,
             latency_scale=1.0,
+            launch_overhead_ms=launch_overhead_ms,
             jitter=Distribution.from_yaml(stage.analytical.jitter),
         )
 

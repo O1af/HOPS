@@ -273,6 +273,52 @@ def test_derived_stage_latency_uses_device_capabilities():
     assert abs(sample - (expected_compute + expected_memory + DEFAULT_LAUNCH_OVERHEAD_MS)) < 1e-9
 
 
+def test_device_launch_overhead_override_is_applied():
+    rng = np.random.default_rng(0)
+    topology = Topology([
+        Device(
+            "gpu0",
+            "gpu",
+            8192,
+            flops=100.0,
+            memory_bandwidth_gbps=400.0,
+            launch_overhead_ms=0.0,
+        )
+    ], [])
+    config = parse_config({
+        "simulation": {"batches": 1, "microbatches": 1, "seed": 0},
+        "pipeline": {
+            "schedule": "gpipe",
+            "precision": "fp32",
+            "activation_mb": 0.0,
+            "backward_factor": 2.0,
+            "stages": [{
+                "device": "gpu0",
+                "weights_mb": 0.0,
+                "compute": {
+                    "mode": "analytical",
+                    "tflop": 10.0,
+                    "memory_mb": 100.0,
+                    "efficiency": {"compute": 1.0, "memory": 1.0},
+                },
+            }],
+        },
+        "hardware": {
+            "devices": [{"id": "gpu0", "gpu": "a100", "node": "node0", "socket": 0}],
+            "interconnect": {"same_node": "nvlink", "cross_node": "infiniband"},
+        },
+        "optimizer": {"enabled": False},
+        "failure": {"enabled": False},
+        "output": {},
+    })
+    model = ComputeModel.from_pipeline_config(config.pipeline, topology=topology)
+
+    sample = model.sample(0, Phase.FORWARD, rng)
+    expected_compute = 1000.0 * 10.0 / 100.0
+    expected_memory = (100.0 * 8.0) / 400.0
+    assert abs(sample - (expected_compute + expected_memory)) < 1e-9
+
+
 def test_per_device_utilization_aggregates_compute_on_shared_device():
     collector = MetricsCollector()
     collector.record_compute(0, 0, Phase.FORWARD, "gpu0", 0.0, 2.0)
