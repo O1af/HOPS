@@ -269,7 +269,8 @@ def test_derived_stage_latency_uses_device_capabilities():
     sample = model.sample(0, Phase.FORWARD, rng)
     expected_compute = 1000.0 * 10.0 / 100.0
     expected_memory = (100.0 * 8.0) / 400.0
-    assert abs(sample - (expected_compute + expected_memory)) < 1e-9
+    from hops.latency.compute_model import DEFAULT_LAUNCH_OVERHEAD_MS
+    assert abs(sample - (expected_compute + expected_memory + DEFAULT_LAUNCH_OVERHEAD_MS)) < 1e-9
 
 
 def test_per_device_utilization_aggregates_compute_on_shared_device():
@@ -358,4 +359,5 @@ def test_derived_latency_applies_memory_locality_penalty():
     sample = model.sample(0, Phase.FORWARD, rng)
     expected_compute = (1000.0 * 10.0 / 100.0) * 1.2
     expected_memory = (100.0 * 8.0) / (400.0 * 0.5) + 1.0
-    assert abs(sample - (expected_compute + expected_memory)) < 1e-9
+    from hops.latency.compute_model import DEFAULT_LAUNCH_OVERHEAD_MS
+    assert abs(sample - (expected_compute + expected_memory + DEFAULT_LAUNCH_OVERHEAD_MS)) < 1e-9

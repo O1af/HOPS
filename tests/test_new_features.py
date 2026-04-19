@@ -521,7 +521,10 @@ class TestMixedPrecision:
         time_fp32 = model_fp32.sample(0, Phase.FORWARD, rng)
         time_fp16 = model_fp16.sample(0, Phase.FORWARD, rng)
 
-        assert abs(time_fp16 - time_fp32 / 2) < 0.001
+        from hops.latency.compute_model import DEFAULT_LAUNCH_OVERHEAD_MS
+        compute_fp32 = time_fp32 - DEFAULT_LAUNCH_OVERHEAD_MS
+        compute_fp16 = time_fp16 - DEFAULT_LAUNCH_OVERHEAD_MS
+        assert abs(compute_fp16 - compute_fp32 / 2) < 0.001
 
 
 # ── Feature 1 + 9 combo: ZeroBubble with mixed precision ────────────────

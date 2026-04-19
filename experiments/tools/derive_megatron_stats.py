@@ -149,9 +149,7 @@ def fit_iteration_barrier(events, min_iteration: int = 0) -> BarrierFit | None:
                 union_ns += cur_e - cur_s
                 cur_s, cur_e = s, e
         union_ns += cur_e - cur_s
-        dead_ns = (wall_end - wall_start) - union_ns
-        if dead_ns <= 0:
-            continue
+        dead_ns = max(0, (wall_end - wall_start) - union_ns)
         dead_ms.append(dead_ns / 1_000_000.0)
 
     if not dead_ms:
