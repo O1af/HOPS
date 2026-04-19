@@ -248,8 +248,8 @@ def test_default_efficiency_applied_when_omitted():
 
     parsed = parse_config(config)
 
-    assert parsed.pipeline.stages[0].analytical.efficiency_compute == 0.3
-    assert parsed.pipeline.stages[0].analytical.efficiency_memory == 0.3
+    assert parsed.pipeline.stages[0].analytical.efficiency_compute == 0.45
+    assert parsed.pipeline.stages[0].analytical.efficiency_memory == 0.6
 
 
 def test_explicit_efficiency_overrides_default():

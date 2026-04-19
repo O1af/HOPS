@@ -408,7 +408,7 @@ class Pipeline:
         src = event.payload["src_device"]
         dst = event.payload["dst_device"]
         size_mb = event.payload["size_mb"]
-        start_time, end_time = self.timing_model.reserve_transfer(
+        start_time, end_time, tid = self.timing_model.reserve_transfer(
             now=engine.now, src_device=src, dst_device=dst, size_mb=size_mb,
         )
         if start_time > engine.now:
@@ -416,18 +416,30 @@ class Pipeline:
                                   payload=event.payload))
             return
 
+        base_payload = {**event.payload, "transfer_start": start_time,
+                        "transfer_id": tid}
+        self.timing_model.set_transfer_payload(tid, base_payload,
+                                               EventKind.ALLREDUCE_END)
         engine.schedule(Event(
             time=end_time,
             kind=EventKind.ALLREDUCE_END,
-            payload={**event.payload, "transfer_start": start_time},
+            payload={**base_payload, "generation": 0},
         ))
 
     def _on_allreduce_end(self, event: Event, engine: EventEngine) -> None:
+        tid = event.payload.get("transfer_id", -1)
+        generation = event.payload.get("generation", 0)
+
+        if tid >= 0 and not self.timing_model.is_transfer_current(tid, generation):
+            return
+
         transfer_start = event.payload["transfer_start"]
         src = event.payload["src_device"]
         dst = event.payload["dst_device"]
 
-        self.timing_model.release_transfer(src, dst)
+        reschedules = self.timing_model.release_transfer(
+            src, dst, tid, engine.now)
+        self._reschedule_link_transfers(reschedules, engine)
 
         self.collector.record_transfer(
             None, Phase.OPTIMIZER, src, dst, transfer_start, engine.now)
@@ -481,6 +493,16 @@ class Pipeline:
                                       start_time, engine.now)
         self._batch.optimizer_pending -= 1
 
+    def _reschedule_link_transfers(self, reschedules: list, engine: EventEngine) -> None:
+        for tid, new_end, new_gen in reschedules:
+            t = self.timing_model._in_flight.get(tid)
+            if t is not None and t.event_payload:
+                engine.schedule(Event(
+                    time=new_end,
+                    kind=t.reschedule_kind,
+                    payload={**t.event_payload, "generation": new_gen},
+                ))
+
     def _schedule_transfer(self, mb_id: int, phase: Phase,
                            from_stage: int, to_stage: int) -> None:
         src_device = self.stages[from_stage].device_id
@@ -497,7 +519,7 @@ class Pipeline:
     def _on_transfer_start(self, event: Event, engine: EventEngine) -> None:
         src = event.payload["src_device"]
         dst = event.payload["dst_device"]
-        start_time, end_time = self.timing_model.reserve_transfer(
+        start_time, end_time, tid = self.timing_model.reserve_transfer(
             now=engine.now,
             src_device=src,
             dst_device=dst,
@@ -511,13 +533,23 @@ class Pipeline:
             ))
             return
 
+        base_payload = {**event.payload, "transfer_start": start_time,
+                        "transfer_id": tid}
+        self.timing_model.set_transfer_payload(tid, base_payload,
+                                               EventKind.TRANSFER_END)
         engine.schedule(Event(
             time=end_time,
             kind=EventKind.TRANSFER_END,
-            payload={**event.payload, "transfer_start": start_time},
+            payload={**base_payload, "generation": 0},
         ))
 
     def _on_transfer_end(self, event: Event, engine: EventEngine) -> None:
+        tid = event.payload.get("transfer_id", -1)
+        generation = event.payload.get("generation", 0)
+
+        if tid >= 0 and not self.timing_model.is_transfer_current(tid, generation):
+            return
+
         mb_id = event.payload["microbatch_id"]
         phase = event.payload["phase"]
         to_stage = event.payload["to_stage"]
@@ -525,7 +557,9 @@ class Pipeline:
         src = event.payload["src_device"]
         dst = event.payload["dst_device"]
 
-        self.timing_model.release_transfer(src, dst)
+        reschedules = self.timing_model.release_transfer(
+            src, dst, tid, engine.now)
+        self._reschedule_link_transfers(reschedules, engine)
 
         global_mb_id = mb_id + self._batch.microbatch_offset
         self.collector.record_transfer(

@@ -63,7 +63,7 @@ class DerivedLatency:
             memory_ms = (self.memory_access_mb * 8.0) / effective_bw
             memory_ms += self.memory_latency_us / 1000.0
 
-        base_ms = (compute_ms + memory_ms) * self.latency_scale + self.launch_overhead_ms
+        base_ms = max(compute_ms, memory_ms) * self.latency_scale + self.launch_overhead_ms
         return max(0.0, base_ms + self.jitter.sample(rng))
 
 

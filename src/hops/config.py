@@ -8,8 +8,11 @@ from hops.core.types import AllreduceAlgo, Precision
 from hops.latency.distributions import Distribution
 
 
-DEFAULT_ANALYTICAL_EFFICIENCY = 0.3
-"""Fallback compute/memory efficiency when a stage omits the efficiency block."""
+DEFAULT_COMPUTE_EFFICIENCY = 0.45
+"""Fallback compute efficiency (matmul-heavy stages achieve ~50-60% of peak)."""
+
+DEFAULT_MEMORY_EFFICIENCY = 0.6
+"""Fallback memory bandwidth efficiency (memory-bound ops see ~60-80% utilization)."""
 
 
 def _require_positive(value: float | int, label: str) -> None:
@@ -298,8 +301,8 @@ class ConfigParser:
             analytical = AnalyticalComputeConfig(
                 tflop=compute_raw["tflop"],
                 memory_mb=compute_raw.get("memory_mb", 0.0),
-                efficiency_compute=efficiency.get("compute", DEFAULT_ANALYTICAL_EFFICIENCY),
-                efficiency_memory=efficiency.get("memory", DEFAULT_ANALYTICAL_EFFICIENCY),
+                efficiency_compute=efficiency.get("compute", DEFAULT_COMPUTE_EFFICIENCY),
+                efficiency_memory=efficiency.get("memory", DEFAULT_MEMORY_EFFICIENCY),
                 jitter=compute_raw.get("jitter", {"type": "constant", "value": 0.0}),
             )
             _require_positive(
