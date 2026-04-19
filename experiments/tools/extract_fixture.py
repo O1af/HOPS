@@ -1,4 +1,4 @@
-"""Extract a fixture from an experiment's output into fixtures/cluster_results/.
+"""Extract a fixture from an experiment's output into fixtures.
 
 Supports two invocation patterns matching existing experiment layouts:
 
@@ -12,8 +12,8 @@ Supports two invocation patterns matching existing experiment layouts:
       --experiment experiments/experiment_2 \
       --scenario-name 1_all_nodes
 
-The flat fixture layout avoids using a directory named "output/" (which is
-gitignored) and stores only the files needed by the validation pipeline.
+By default, fixtures are extracted into the legacy fixtures/cluster_results/
+root. Pass --split to write into fixtures/<split>/cluster_results/.
 """
 
 from __future__ import annotations
@@ -28,7 +28,13 @@ import yaml
 from _common import repo_root
 
 
-FIXTURE_ROOT = repo_root() / "fixtures" / "cluster_results"
+SPLITS = ("train", "test", "diagnostic", "archive")
+
+
+def _fixture_root(split: str | None = None) -> Path:
+    if split is None:
+        return repo_root() / "fixtures" / "cluster_results"
+    return repo_root() / "fixtures" / split / "cluster_results"
 
 
 def _read_tsv(experiment_dir: Path) -> dict[str, tuple[str, str]]:
@@ -101,8 +107,9 @@ def extract(
     run_job_id: str,
     link_bench_job_id: str,
     fixture_id: str | None = None,
+    fixture_root: Path | None = None,
 ) -> Path:
-    """Extract a fixture from experiment output into fixtures/cluster_results/."""
+    """Extract a fixture from experiment output into a fixture root."""
     base_config, run_dir, trace_map, megatron_summary, lb_dir = _validate_source(
         scenario_dir, run_job_id, link_bench_job_id
     )
@@ -110,7 +117,10 @@ def extract(
     if fixture_id is None:
         fixture_id = _derive_fixture_id(scenario_dir, run_job_id)
 
-    dest = FIXTURE_ROOT / fixture_id
+    if fixture_root is None:
+        fixture_root = _fixture_root()
+
+    dest = fixture_root / fixture_id
     if dest.exists():
         raise SystemExit(
             f"fixture already exists: {dest}\n"
@@ -159,11 +169,18 @@ def _parse_args() -> argparse.Namespace:
 
     parser.add_argument("--all", action="store_true", help="Extract all scenarios from --experiment")
     parser.add_argument("--fixture-id", default=None, help="Override the auto-derived fixture ID")
+    parser.add_argument(
+        "--split",
+        choices=SPLITS,
+        default=None,
+        help="Write into fixtures/<split>/cluster_results instead of the legacy root",
+    )
     return parser.parse_args()
 
 
 def main() -> None:
     args = _parse_args()
+    fixture_root = _fixture_root(args.split)
 
     if args.experiment and args.all:
         experiment_dir = Path(args.experiment).resolve()
@@ -171,10 +188,10 @@ def main() -> None:
         for scenario_name, (run_job_id, lb_job_id) in tsv.items():
             scenario_dir = experiment_dir / scenario_name
             fixture_id = _derive_fixture_id(scenario_dir, run_job_id)
-            if (FIXTURE_ROOT / fixture_id).exists():
+            if (fixture_root / fixture_id).exists():
                 print(f"skipping {fixture_id} (already exists)")
                 continue
-            extract(scenario_dir, run_job_id, lb_job_id)
+            extract(scenario_dir, run_job_id, lb_job_id, fixture_root=fixture_root)
         return
 
     if args.experiment and args.scenario_name:
@@ -202,7 +219,13 @@ def main() -> None:
             "  --experiment + --all"
         )
 
-    extract(scenario_dir, run_job_id, lb_job_id, fixture_id=args.fixture_id)
+    extract(
+        scenario_dir,
+        run_job_id,
+        lb_job_id,
+        fixture_id=args.fixture_id,
+        fixture_root=fixture_root,
+    )
 
 
 if __name__ == "__main__":

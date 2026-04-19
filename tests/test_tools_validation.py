@@ -14,13 +14,19 @@ from hops.config import parse_config
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _TOOLS_DIR = _REPO_ROOT / "experiments" / "tools"
+_FIXTURES_DIR = _REPO_ROOT / "fixtures"
 if str(_TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(_TOOLS_DIR))
+if str(_FIXTURES_DIR) not in sys.path:
+    sys.path.insert(0, str(_FIXTURES_DIR))
 
 import compare_run  # noqa: E402
 import derive_megatron_stats  # noqa: E402
+import loader  # noqa: E402
 import materialize_hops_variant  # noqa: E402
 import parse_link_bench  # noqa: E402
+import split_fixtures  # noqa: E402
+import validate_fixtures  # noqa: E402
 
 
 def _write_jsonl(path: Path, rows: list[dict]) -> None:
@@ -214,6 +220,80 @@ def test_materialize_fails_on_invalid_merged_config(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError):
         materialize_hops_variant.materialize(base_path, [bad_overlay], tmp_path / "out.yaml")
+
+
+def test_loader_discovers_managed_splits_and_legacy(tmp_path: Path) -> None:
+    fixtures_base = tmp_path / "fixtures"
+    for root, fixture_name in [
+        (fixtures_base / "train" / "cluster_results", "exp2_train_run1"),
+        (fixtures_base / "test" / "cluster_results", "exp3_test_run2"),
+        (fixtures_base / "cluster_results", "legacy_run3"),
+    ]:
+        fixture_dir = root / fixture_name
+        fixture_dir.mkdir(parents=True)
+        (fixture_dir / "manifest.yaml").write_text("{}\n", encoding="utf-8")
+
+    train = loader.discover_fixtures(split="train", fixtures_base=fixtures_base)
+    assert [fixture.name for fixture in train] == ["exp2_train_run1"]
+
+    all_fixtures = loader.discover_fixtures(split="all", fixtures_base=fixtures_base)
+    assert [fixture.name for fixture in all_fixtures] == [
+        "exp2_train_run1",
+        "exp3_test_run2",
+        "legacy_run3",
+    ]
+
+
+def test_split_fixtures_plans_expected_groups(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(split_fixtures, "repo_root", lambda: tmp_path)
+
+    exp2 = tmp_path / "experiments" / "experiment_2"
+    exp3 = tmp_path / "experiments" / "experiment_3"
+    exp2.mkdir(parents=True)
+    exp3.mkdir(parents=True)
+    exp2.joinpath("sequential_jobs.tsv").write_text(
+        "scenario\trun_job_id\tlink_bench_job_id\n"
+        "1_all_nodes\t93\t95\n",
+        encoding="utf-8",
+    )
+    exp3.joinpath("sequential_jobs.tsv").write_text(
+        "scenario\trun_job_id\tlink_bench_job_id\n"
+        "01_a10g_h100_pp2\t213\t215\n"
+        "43_diag_all_nodes_gpipe\t359\t361\n",
+        encoding="utf-8",
+    )
+
+    flat = tmp_path / "fixtures" / "cluster_results"
+    for fixture_id in [
+        "exp2_1_all_nodes_run93",
+        "exp2_1_all_nodes_run51",
+        "exp3_01_a10g_h100_pp2_run213",
+        "exp3_43_diag_all_nodes_gpipe_run359",
+    ]:
+        fixture_dir = flat / fixture_id
+        fixture_dir.mkdir(parents=True)
+        (fixture_dir / "manifest.yaml").write_text("{}\n", encoding="utf-8")
+
+    moves = split_fixtures.plan_moves()
+    planned = {move.fixture_id: move.split for move in moves}
+    assert planned == {
+        "exp2_1_all_nodes_run93": "train",
+        "exp2_1_all_nodes_run51": "archive",
+        "exp3_01_a10g_h100_pp2_run213": "test",
+        "exp3_43_diag_all_nodes_gpipe_run359": "diagnostic",
+    }
+
+
+def test_validate_resolves_default_parallel_jobs(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(validate_fixtures.os, "cpu_count", lambda: 12)
+
+    assert validate_fixtures._resolve_jobs(None, fixture_count=98, verbose=False) == 8
+    assert validate_fixtures._resolve_jobs(None, fixture_count=4, verbose=False) == 4
+    assert validate_fixtures._resolve_jobs(None, fixture_count=98, verbose=True) == 8
+    assert validate_fixtures._resolve_jobs(3, fixture_count=98, verbose=True) == 3
+
+    with pytest.raises(SystemExit):
+        validate_fixtures._resolve_jobs(0, fixture_count=98, verbose=False)
 
 
 def test_derive_megatron_stats_fits_forward_per_stage(tmp_path: Path) -> None:
