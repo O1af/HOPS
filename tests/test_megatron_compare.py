@@ -192,6 +192,7 @@ def test_convert_job_dir_writes_hops_compatible_outputs(tmp_path):
         "memory",
         "optimizer",
         "peak_in_flight_per_stage",
+        "phase_breakdown",
         "throughput",
         "time_ms",
         "utilization",

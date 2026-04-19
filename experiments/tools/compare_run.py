@@ -62,16 +62,16 @@ def _load_json(path: Path) -> dict | None:
 def _ensure_megatron_summary(job_dir: Path, convert_job_dir) -> dict | None:
     summary_path = job_dir / "megatron_summary.json"
     existing = _load_json(summary_path)
-    if existing is not None:
+    if existing is not None and "phase_breakdown" in existing:
         return existing
 
     trace_dir = job_dir / "megatron_trace"
     if not trace_dir.is_dir():
-        return None
+        return existing
     try:
         next(trace_dir.glob("*.jsonl"))
     except StopIteration:
-        return None
+        return existing
 
     convert_job_dir(job_dir)
     return _load_json(summary_path)
@@ -188,6 +188,8 @@ def _variant_row(summary: dict, megatron: dict | None, build_comparison) -> dict
                 abs(hops_u[i] - mega_u[i]) for i in range(len(keys))
             )
 
+    phase_breakdown = comparison.get("phase_breakdown") if comparison else None
+
     return {
         "summary": summary,
         "comparison": comparison,
@@ -202,6 +204,7 @@ def _variant_row(summary: dict, megatron: dict | None, build_comparison) -> dict
         "util_spearman_rho": util_spearman_rho,
         "util_max_abs_delta": util_max_abs_delta,
         "per_stage_util": per_stage_util,
+        "phase_breakdown": phase_breakdown,
     }
 
 
@@ -307,6 +310,30 @@ def build_markdown_report(document: dict) -> str:
                 f"{format_number(entry['megatron'])} | "
                 f"{format_number(entry['hops'])} | "
                 f"{format_number(entry['delta'])} |"
+            )
+        lines.append("")
+
+    for name in VARIANT_ORDER:
+        row = variants.get(name, {})
+        breakdown = row.get("phase_breakdown") if isinstance(row, dict) else None
+        if not breakdown:
+            continue
+        lines.append(f"### {name} — per-operation timing breakdown")
+        lines.append("")
+        lines.append("| stage / phase | real (ms) | sim (ms) | delta (ms) | error (%) |")
+        lines.append("| --- | --- | --- | --- | --- |")
+        for key in sorted(breakdown):
+            entry = breakdown[key]
+            meg = entry.get("megatron")
+            hops = entry.get("hops")
+            delta = entry.get("delta")
+            pct = entry.get("pct_delta_vs_hops")
+            lines.append(
+                f"| {key} | "
+                f"{format_number(meg, '.1f')} | "
+                f"{format_number(hops, '.1f')} | "
+                f"{format_number(delta, '+.1f')} | "
+                f"{format_number(pct, '+.1f')} |"
             )
         lines.append("")
 

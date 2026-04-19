@@ -60,6 +60,14 @@ class ContentionSummary:
 
 
 @dataclass(frozen=True)
+class PhaseBreakdownEntry:
+    stage: int
+    phase: str
+    total_ms: float
+    count: int
+
+
+@dataclass(frozen=True)
 class SimulationSummary:
     completed_microbatches: int
     throughput: ThroughputSummary
@@ -72,6 +80,7 @@ class SimulationSummary:
     memory: MemorySummary
     contention: ContentionSummary
     peak_in_flight_per_stage: dict[int, int] = field(default_factory=dict)
+    phase_breakdown: list[PhaseBreakdownEntry] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
