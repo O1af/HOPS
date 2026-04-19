@@ -1,0 +1,38 @@
+# Analytical template for experiment_3 08_a10g_l4_hidden1280_pp2.
+# Purpose: PP2 G-family with held-out hidden width.
+
+simulation:
+  batches: 10
+  microbatches: 4
+  seed: 42
+
+pipeline:
+  schedule: 1f1b
+  precision: bf16
+  backward_factor: 2.0
+  model:
+    hidden_dim: 1280
+    seq_len: 1024
+  stages:
+    - device: a10g_node0_gpu0
+      weights_mb: 9600
+      compute: { mode: analytical, tflop: 0.28125, memory_mb: 600 }
+    - device: l4_node0_gpu0
+      weights_mb: 9600
+      compute: { mode: analytical, tflop: 0.28125, memory_mb: 600 }
+
+hardware:
+  devices:
+    - { id: a10g_node0_gpu0, gpu: a10g, node: a10g_node0, socket: 0 }
+    - { id: l4_node0_gpu0, gpu: l4, node: l4_node0, socket: 0 }
+  interconnect:
+    same_node: pcie
+    cross_node: ethernet
+
+optimizer:
+  enabled: false
+
+failure:
+  enabled: false
+
+output: {}
