@@ -22,7 +22,7 @@ def test_link_transfer_time_positive():
         [Link("a", "b", bandwidth_gbps=100.0, base_latency_us=5.0, jitter=Constant(0.0))],
     )
     timing = TimingModel(topology, ComputeModel({}), rng)
-    _, end_time = timing.reserve_transfer(now=0.0, src_device="a", dst_device="b", size_mb=50.0)
+    _, end_time, _ = timing.reserve_transfer(now=0.0, src_device="a", dst_device="b", size_mb=50.0)
     assert end_time > 0.0
 
 
@@ -33,9 +33,9 @@ def test_link_transfer_time_scales_with_size():
         [Link("a", "b", bandwidth_gbps=100.0, base_latency_us=0.0, jitter=Constant(0.0))],
     )
     timing = TimingModel(topology, ComputeModel({}), rng)
-    _, t1 = timing.reserve_transfer(now=0.0, src_device="a", dst_device="b", size_mb=10.0)
-    timing.release_transfer("a", "b")
-    _, t2 = timing.reserve_transfer(now=0.0, src_device="a", dst_device="b", size_mb=20.0)
+    _, t1, tid1 = timing.reserve_transfer(now=0.0, src_device="a", dst_device="b", size_mb=10.0)
+    timing.release_transfer("a", "b", tid1, t1)
+    _, t2, _ = timing.reserve_transfer(now=0.0, src_device="a", dst_device="b", size_mb=20.0)
     assert abs(t2 - 2 * t1) < 1e-10
 
 

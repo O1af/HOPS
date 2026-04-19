@@ -227,7 +227,7 @@ class TestOverlapAndContention:
         tm = TimingModel(topology, compute_model, rng)
 
         # Reserve a transfer — should not touch device busy_until
-        tm.reserve_transfer(now=0.0, src_device="gpu0", dst_device="gpu1", size_mb=1.0)
+        _, _, _ = tm.reserve_transfer(now=0.0, src_device="gpu0", dst_device="gpu1", size_mb=1.0)
         assert devices[0].busy_until == 0.0  # device not blocked
 
         # Reserve compute — should use device busy_until
@@ -246,11 +246,11 @@ class TestOverlapAndContention:
         tm = TimingModel(topology, compute_model, rng)
 
         # First transfer: full bandwidth (800 Gbps)
-        s1, e1 = tm.reserve_transfer(now=0.0, src_device="a", dst_device="b", size_mb=100.0)
+        s1, e1, _ = tm.reserve_transfer(now=0.0, src_device="a", dst_device="b", size_mb=100.0)
         duration_alone = e1 - s1
 
         # Second transfer: bandwidth halved (2 active)
-        s2, e2 = tm.reserve_transfer(now=0.0, src_device="a", dst_device="b", size_mb=100.0)
+        s2, e2, _ = tm.reserve_transfer(now=0.0, src_device="a", dst_device="b", size_mb=100.0)
         duration_contended = e2 - s2
 
         assert duration_contended > duration_alone
@@ -265,9 +265,9 @@ class TestOverlapAndContention:
         from hops.core.timing import TimingModel
         tm = TimingModel(topology, compute_model, rng)
 
-        tm.reserve_transfer(now=0.0, src_device="a", dst_device="b", size_mb=1.0)
+        _, _, tid = tm.reserve_transfer(now=0.0, src_device="a", dst_device="b", size_mb=1.0)
         assert links[0].active_transfers == 1
-        tm.release_transfer("a", "b")
+        tm.release_transfer("a", "b", tid, 0.0)
         assert links[0].active_transfers == 0
 
     def test_transfer_locality_penalty_scales_duration(self):
@@ -290,7 +290,7 @@ class TestOverlapAndContention:
         from hops.core.timing import TimingModel
         tm = TimingModel(topology, compute_model, rng)
 
-        start_time, end_time = tm.reserve_transfer(
+        start_time, end_time, _ = tm.reserve_transfer(
             now=0.0,
             src_device="n0_gpu0",
             dst_device="n0_gpu1",
@@ -321,17 +321,43 @@ class TestOverlapAndContention:
         from hops.core.timing import TimingModel
         tm = TimingModel(topology, compute_model, rng)
 
-        s1, e1 = tm.reserve_transfer(
+        s1, e1, tid1 = tm.reserve_transfer(
             now=0.0, src_device="n0_gpu0", dst_device="n1_gpu0", size_mb=100.0,
         )
         assert abs((e1 - s1) - 1.0) < 1e-9
 
-        tm.release_transfer("n0_gpu0", "n1_gpu0")
+        tm.release_transfer("n0_gpu0", "n1_gpu0", tid1, e1)
 
-        s2, e2 = tm.reserve_transfer(
+        s2, e2, _ = tm.reserve_transfer(
             now=0.0, src_device="n1_gpu0", dst_device="n2_gpu0", size_mb=100.0,
         )
         assert abs((e2 - s2) - 1.5) < 1e-9
+
+    def test_dynamic_contention_shortens_remaining_transfer(self):
+        """When a transfer finishes, remaining transfers on the same link should
+        complete sooner due to increased available bandwidth."""
+        rng = np.random.default_rng(0)
+        devices = [Device("a", "gpu", 8192), Device("b", "gpu", 8192)]
+        links = [Link("a", "b", 800, 0.0, Constant(0.0))]
+        topology = Topology(devices, links)
+        compute_model = ComputeModel({})
+
+        from hops.core.timing import TimingModel
+        tm = TimingModel(topology, compute_model, rng)
+
+        # Two simultaneous transfers: each gets 400 Gbps
+        _, e1, tid1 = tm.reserve_transfer(now=0.0, src_device="a", dst_device="b", size_mb=100.0)
+        _, e2_original, tid2 = tm.reserve_transfer(now=0.0, src_device="a", dst_device="b", size_mb=100.0)
+
+        # Transfer 1 finishes first (it got full BW: 100*8/800 = 1.0 ms)
+        reschedules = tm.release_transfer("a", "b", tid1, e1)
+
+        # Transfer 2 should be rescheduled to finish sooner
+        assert len(reschedules) == 1
+        rescheduled_tid, new_end, new_gen = reschedules[0]
+        assert rescheduled_tid == tid2
+        assert new_end < e2_original
+        assert new_gen == 1
 
 
 # ── Feature 6: Pipeline drain verification ───────────────────────────────
