@@ -21,6 +21,11 @@ dev = [
     "matplotlib",
 ]
 
+[tool.pytest.ini_options]
+markers = [
+    "slow: full validation pipeline tests (deselect with '-m \"not slow\"')",
+]
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"

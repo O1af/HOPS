@@ -27,3 +27,5 @@ output/
 megatron-key.pem
 
 Megatron-LM/
+experiments/experiment_2/sequential_jobs.tsv
+fixtures/
