@@ -20,6 +20,7 @@ if str(_TOOLS_DIR) not in sys.path:
 if str(_FIXTURES_DIR) not in sys.path:
     sys.path.insert(0, str(_FIXTURES_DIR))
 
+import aggregate  # noqa: E402
 import compare_run  # noqa: E402
 import derive_megatron_stats  # noqa: E402
 import loader  # noqa: E402
@@ -873,3 +874,62 @@ def test_analytical_stage_still_scales_with_precision() -> None:
     compute_bf16 = fwd_bf16 - DEFAULT_LAUNCH_OVERHEAD_MS
     compute_fp32 = fwd_fp32 - DEFAULT_LAUNCH_OVERHEAD_MS
     assert compute_bf16 == pytest.approx(compute_fp32 / 2.0, rel=0.01)
+
+
+def test_classify_fixture_extracts_device_group() -> None:
+    assert validate_fixtures._classify_fixture("exp2_13_a10g_pair_pp2_run135") == "a10g"
+    assert validate_fixtures._classify_fixture("exp2_14_l4_pair_pp2_run137") == "l4"
+    assert validate_fixtures._classify_fixture("exp2_22_h100_pair_gpipe_run165") == "h100"
+    assert validate_fixtures._classify_fixture("exp2_12_g_only_zero_bubble_run109") == "g_family"
+    assert validate_fixtures._classify_fixture("exp2_1_all_nodes_run51") == "mixed"
+    assert validate_fixtures._classify_fixture("exp2_18_mixed_pp3_h100_a10g_l4_run149") == "mixed"
+    assert validate_fixtures._classify_fixture("exp2_15_h100_a10g_pair_pp2_run139") == "mixed"
+    assert validate_fixtures._classify_fixture("exp2_2_reverse_order_run111") == "mixed"
+
+
+def test_save_golden_merges_with_existing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    golden_path = tmp_path / "expected_metrics.json"
+    monkeypatch.setattr(validate_fixtures, "GOLDEN_PATH", golden_path)
+
+    existing = {
+        "schema_version": 2,
+        "tolerances": validate_fixtures.TOLERANCES,
+        "fixtures": {
+            "fixture_a": {"no_lookahead": {"throughput_error_pct": 10.0}},
+            "fixture_b": {"no_lookahead": {"throughput_error_pct": 20.0}},
+            "fixture_c": {"no_lookahead": {"throughput_error_pct": 30.0}},
+        },
+        "suite": {"throughput_mape": 20.0, "bubble_mae_pp": 5.0, "util_spearman_mean": 0.5},
+    }
+
+    suite = aggregate.SuiteResult(
+        fixtures=[
+            aggregate.FixtureResult(
+                fixture_id="fixture_a",
+                megatron=aggregate.MegatronBaseline(None, None, None, None),
+                variant_scores={
+                    "no_lookahead": aggregate.VariantScore(
+                        variant="no_lookahead", throughput_per_s=None,
+                        throughput_error_pct=5.0, latency_mean_ms=None,
+                        bubble_ratio=None, bubble_pp_delta=None,
+                        comm_overhead_ratio=None, comm_overhead_delta=None,
+                        util_spearman_rho=None, util_max_abs_delta=None,
+                        per_stage_util=None,
+                    ),
+                },
+            ),
+        ],
+        aggregates=aggregate.SuiteAggregates(
+            throughput_mape=5.0, bubble_mae_pp=0.0, util_spearman_mean=None,
+        ),
+    )
+
+    validate_fixtures._save_golden(suite, existing)
+
+    result = json.loads(golden_path.read_text(encoding="utf-8"))
+    assert "fixture_a" in result["fixtures"]
+    assert "fixture_b" in result["fixtures"]
+    assert "fixture_c" in result["fixtures"]
+    assert result["fixtures"]["fixture_a"]["no_lookahead"]["throughput_error_pct"] == 5.0
+    assert result["fixtures"]["fixture_b"]["no_lookahead"]["throughput_error_pct"] == 20.0
+    assert result["suite"]["throughput_mape"] == 5.0

@@ -43,17 +43,9 @@ def _load_golden() -> dict:
     return json.loads(GOLDEN_PATH.read_text(encoding="utf-8"))
 
 
-def _save_golden(suite: aggregate.SuiteResult) -> None:
-    doc: dict = {
-        "schema_version": 2,
-        "tolerances": TOLERANCES,
-        "fixtures": {},
-        "suite": {
-            "throughput_mape": round(suite.aggregates.throughput_mape, 2),
-            "bubble_mae_pp": round(suite.aggregates.bubble_mae_pp, 2),
-            "util_spearman_mean": round(suite.aggregates.util_spearman_mean, 3) if suite.aggregates.util_spearman_mean is not None else None,
-        },
-    }
+def _save_golden(suite: aggregate.SuiteResult, existing_golden: dict) -> None:
+    merged_fixtures: dict = dict(existing_golden.get("fixtures", {}))
+
     for fr in suite.fixtures:
         per_variant: dict = {}
         for name, vs in fr.variant_scores.items():
@@ -66,7 +58,18 @@ def _save_golden(suite: aggregate.SuiteResult) -> None:
                 entry["util_spearman_rho"] = round(vs.util_spearman_rho, 3)
             if entry:
                 per_variant[name] = entry
-        doc["fixtures"][fr.fixture_id] = per_variant
+        merged_fixtures[fr.fixture_id] = per_variant
+
+    doc: dict = {
+        "schema_version": 2,
+        "tolerances": TOLERANCES,
+        "fixtures": merged_fixtures,
+        "suite": {
+            "throughput_mape": round(suite.aggregates.throughput_mape, 2),
+            "bubble_mae_pp": round(suite.aggregates.bubble_mae_pp, 2),
+            "util_spearman_mean": round(suite.aggregates.util_spearman_mean, 3) if suite.aggregates.util_spearman_mean is not None else None,
+        },
+    }
 
     GOLDEN_PATH.write_text(
         json.dumps(doc, indent=2, sort_keys=False) + "\n", encoding="utf-8"
@@ -218,6 +221,81 @@ def _check_regression(
     return issues
 
 
+_DEVICE_KEYWORDS = ("h100", "a100", "a10g", "l4", "l40s")
+
+
+def _classify_fixture(fixture_id: str) -> str:
+    """Return device group for a fixture: a device keyword, "g_family", "mixed", or "other"."""
+    lower = fixture_id.lower()
+    parts = lower.split("_")
+    desc = "_".join(parts[1:]) if len(parts) > 1 else lower
+
+    # e.g. "13_a10g_pair_pp2", "22_h100_pair_gpipe"
+    for kw in _DEVICE_KEYWORDS:
+        if f"{kw}_pair" in desc or f"{kw}_only" in desc:
+            found_others = any(
+                other in desc
+                for other in _DEVICE_KEYWORDS
+                if other != kw
+            )
+            if not found_others:
+                return kw
+
+    # "g_only" patterns (A10G + L4 only, no H100)
+    if "g_only" in desc:
+        return "g_family"
+
+    device_hits = [kw for kw in _DEVICE_KEYWORDS if kw in desc]
+    if len(device_hits) > 1:
+        return "mixed"
+    if any(tag in desc for tag in ("mixed", "all_nodes", "reverse_order")):
+        return "mixed"
+
+    return "other"
+
+
+def _print_group_breakdown(suite: aggregate.SuiteResult) -> None:
+    groups: dict[str, list[aggregate.FixtureResult]] = {}
+    for fr in suite.fixtures:
+        group = _classify_fixture(fr.fixture_id)
+        groups.setdefault(group, []).append(fr)
+
+    if len(groups) <= 1:
+        return
+
+    print()
+    print("=" * 120)
+    print("GROUP BREAKDOWN (link_calibrated)")
+    print("=" * 120)
+    print(f"  {'group':<12s} {'count':>5s}  {'MAPE':>8s}  {'MAE_pp':>8s}  {'Spearman':>8s}")
+    print("  " + "-" * 50)
+
+    for group in sorted(groups):
+        fixtures = groups[group]
+        tput_vals: list[float] = []
+        bubble_vals: list[float] = []
+        spearman_vals: list[float] = []
+        for fr in fixtures:
+            lc = fr.variant_scores.get("link_calibrated")
+            if lc is None:
+                continue
+            if lc.throughput_error_pct is not None:
+                tput_vals.append(abs(lc.throughput_error_pct))
+            if lc.bubble_pp_delta is not None:
+                bubble_vals.append(abs(lc.bubble_pp_delta))
+            if lc.util_spearman_rho is not None:
+                spearman_vals.append(lc.util_spearman_rho)
+        mape = sum(tput_vals) / len(tput_vals) if tput_vals else None
+        mae = sum(bubble_vals) / len(bubble_vals) if bubble_vals else None
+        spearman = sum(spearman_vals) / len(spearman_vals) if spearman_vals else None
+        print(
+            f"  {group:<12s} {len(fixtures):>5d}  "
+            f"{_fmt(mape, '.1f', '%'):>8s}  "
+            f"{_fmt(mae, '.1f', 'pp'):>8s}  "
+            f"{_fmt(spearman, '.3f'):>8s}"
+        )
+
+
 def _print_summary(suite: aggregate.SuiteResult, golden: dict) -> None:
     golden_fixtures = golden.get("fixtures", {})
 
@@ -296,6 +374,8 @@ def _print_summary(suite: aggregate.SuiteResult, golden: dict) -> None:
     _agg_line("throughput MAPE", agg.throughput_mape, "throughput_mape", ".1f", "%")
     _agg_line("bubble MAE", agg.bubble_mae_pp, "bubble_mae_pp", ".1f", "pp")
     _agg_line("util Spearman mean", agg.util_spearman_mean, "util_spearman_mean", ".3f", "")
+
+    _print_group_breakdown(suite)
 
 
 def main() -> None:
@@ -379,7 +459,7 @@ def main() -> None:
 
     if args.update_golden:
         print()
-        _save_golden(suite)
+        _save_golden(suite, golden)
         print("RESULT: golden updated")
         return
 
