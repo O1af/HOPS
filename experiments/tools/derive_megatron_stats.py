@@ -102,40 +102,61 @@ class BarrierFit:
 
 
 def fit_iteration_barrier(events, min_iteration: int = 0) -> BarrierFit | None:
-    """Fit the host/framework stall between iterations.
+    """Fit per-iteration host/framework dead time.
 
-    For each adjacent pair of iterations, the barrier is the wall-clock gap
-    between the latest end-of-iteration event and the earliest start-of-next
-    event across all ranks. This captures host-side overhead that CUDA-event
-    traces don't attribute to any kernel (dataloader, CPU-side optimizer.step,
-    launch-queue gaps, framework sync). Negative gaps (overlap) are dropped.
+    For each iteration, the dead time is the wall duration minus the UNION of
+    all event intervals (compute + transfer, across all ranks). This captures
+    every interval where no rank is doing work the pipeline DAG tracks:
+    CPU-side overhead, stream sync gaps between backward and optimizer,
+    framework stalls, data loading, inter-iteration barriers, etc.
+
+    The per-iter wall extends from the iteration's first event start to the
+    NEXT iteration's first event start, so inter-iteration gaps are folded in
+    as well. Negative or zero values are dropped.
     """
+    per_iter_intervals: dict[int, list[tuple[int, int]]] = {}
     per_iter_start: dict[int, int] = {}
-    per_iter_end: dict[int, int] = {}
     for event in events:
         if event.iteration < min_iteration:
             continue
-        start = event.start_wall_ns
-        end = event.end_wall_ns
         it = int(event.iteration)
-        if it not in per_iter_start or start < per_iter_start[it]:
-            per_iter_start[it] = start
-        if it not in per_iter_end or end > per_iter_end[it]:
-            per_iter_end[it] = end
+        per_iter_intervals.setdefault(it, []).append(
+            (event.start_wall_ns, event.end_wall_ns)
+        )
+        if it not in per_iter_start or event.start_wall_ns < per_iter_start[it]:
+            per_iter_start[it] = event.start_wall_ns
 
     iters = sorted(per_iter_start)
-    gaps_ms: list[float] = []
-    for a, b in zip(iters, iters[1:]):
-        gap_ns = per_iter_start[b] - per_iter_end[a]
-        if gap_ns < 0:
-            continue
-        gaps_ms.append(gap_ns / 1_000_000.0)
-
-    if not gaps_ms:
+    if len(iters) < 2:
         return None
-    mean_ms = statistics.mean(gaps_ms)
-    std_ms = statistics.pstdev(gaps_ms) if len(gaps_ms) > 1 else 0.0
-    return BarrierFit(count=len(gaps_ms), mean_ms=mean_ms, std_ms=std_ms)
+
+    dead_ms: list[float] = []
+    for a, b in zip(iters, iters[1:]):
+        intervals = sorted(per_iter_intervals[a])
+        if not intervals:
+            continue
+        wall_start = per_iter_start[a]
+        wall_end = per_iter_start[b]
+        if wall_end <= wall_start:
+            continue
+        union_ns = 0
+        cur_s, cur_e = intervals[0]
+        for s, e in intervals[1:]:
+            if s <= cur_e:
+                if e > cur_e:
+                    cur_e = e
+            else:
+                union_ns += cur_e - cur_s
+                cur_s, cur_e = s, e
+        union_ns += cur_e - cur_s
+        dead_ns = max(0, (wall_end - wall_start) - union_ns)
+        dead_ms.append(dead_ns / 1_000_000.0)
+
+    if not dead_ms:
+        return None
+    mean_ms = statistics.mean(dead_ms)
+    std_ms = statistics.pstdev(dead_ms) if len(dead_ms) > 1 else 0.0
+    return BarrierFit(count=len(dead_ms), mean_ms=mean_ms, std_ms=std_ms)
 
 
 def build_iteration_barrier_overlay(fit: BarrierFit) -> dict:

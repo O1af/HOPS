@@ -51,6 +51,11 @@ def _resolve_device(spec: DeviceSpec, overrides: dict[str, object], registry: Pr
         if override and override.memory_bandwidth_gbps is not None
         else preset.memory_bandwidth_gbps
     )
+    launch_overhead_ms = (
+        override.launch_overhead_ms
+        if override and override.launch_overhead_ms is not None
+        else preset.launch_overhead_ms
+    )
     numa_node = numa_from_socket(spec.socket)
     return Device(
         id=spec.id,
@@ -58,6 +63,7 @@ def _resolve_device(spec: DeviceSpec, overrides: dict[str, object], registry: Pr
         memory_mb=memory_mb,
         flops=flops_tflops,
         memory_bandwidth_gbps=memory_bandwidth_gbps,
+        launch_overhead_ms=launch_overhead_ms,
         node_id=spec.node,
         socket_id=spec.socket,
         numa_node=numa_node,

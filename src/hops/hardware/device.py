@@ -16,6 +16,7 @@ class Device:
     memory_mb: float
     flops: float | None = None
     memory_bandwidth_gbps: float | None = None
+    launch_overhead_ms: float | None = None
     node_id: str = "node0"
     socket_id: str = "socket0"
     numa_node: int = 0

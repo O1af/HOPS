@@ -615,9 +615,10 @@ def test_fit_iteration_barrier_measures_interiter_gap(tmp_path: Path) -> None:
     assert overlay["optimizer"]["iteration_barrier"]["mean"] == pytest.approx(30.0)
 
 
-def test_fit_iteration_barrier_skips_negative_gaps() -> None:
-    # A synthetic sequence of events where iteration 3 starts BEFORE iteration 2 ends
-    # (overlap). The barrier fit must drop that gap.
+def test_fit_iteration_barrier_clamps_when_work_exceeds_wall() -> None:
+    # Intra-iter dead time = (next_iter_start - this_iter_start) - union(events in this iter).
+    # When the union of events exceeds the wall window (e.g. short wall between
+    # iteration starts), dead time clamps at 0 rather than going negative.
     from hops.core.types import Phase
     from hops.megatron.importer import RawMegatronEvent
 
@@ -631,14 +632,14 @@ def test_fit_iteration_barrier_skips_negative_gaps() -> None:
         )
 
     events = [
-        ev(2, 0, 10.0),
-        ev(3, 5_000_000, 10.0),      # overlapping -> skipped
-        ev(4, 40_000_000, 10.0),     # 25ms after end of it=3
+        ev(2, 0, 10.0),              # wall to next iter = 5ms, work = 10ms -> clamped to 0
+        ev(3, 5_000_000, 10.0),
+        ev(4, 40_000_000, 10.0),     # wall to next iter = 35ms, work = 10ms -> 25ms
     ]
     fit = derive_megatron_stats.fit_iteration_barrier(events)
     assert fit is not None
-    assert fit.count == 1
-    assert fit.mean_ms == pytest.approx(25.0)
+    assert fit.count == 2
+    assert fit.mean_ms == pytest.approx(12.5)
 
 
 def test_write_stage_timings_overlay_emits_barrier_overlay(tmp_path: Path) -> None:
@@ -788,4 +789,7 @@ def test_analytical_stage_still_scales_with_precision() -> None:
     model_fp32 = _compute_model_from_raw(raw_fp32)
     fwd_bf16 = model_bf16.sample(0, Phase.FORWARD, np.random.default_rng(0))
     fwd_fp32 = model_fp32.sample(0, Phase.FORWARD, np.random.default_rng(0))
-    assert fwd_bf16 == pytest.approx(fwd_fp32 / 2.0, rel=0.01)
+    from hops.latency.compute_model import DEFAULT_LAUNCH_OVERHEAD_MS
+    compute_bf16 = fwd_bf16 - DEFAULT_LAUNCH_OVERHEAD_MS
+    compute_fp32 = fwd_fp32 - DEFAULT_LAUNCH_OVERHEAD_MS
+    assert compute_bf16 == pytest.approx(compute_fp32 / 2.0, rel=0.01)

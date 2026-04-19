@@ -28,6 +28,11 @@ class DistributionLatency:
         return max(0.0, self.distribution.sample(rng) * self.scale + self.offset_ms)
 
 
+# Fixed per-invocation overhead (kernel launch + Python/CUDA glue). For tiny
+# transformer stages on modern GPUs this dwarfs the pure FLOP-budget estimate.
+DEFAULT_LAUNCH_OVERHEAD_MS = 1.5
+
+
 @dataclass
 class DerivedLatency:
     workload_tflop: float
@@ -40,6 +45,7 @@ class DerivedLatency:
     memory_bandwidth_scale: float = 1.0
     memory_latency_us: float = 0.0
     latency_scale: float = 1.0
+    launch_overhead_ms: float = DEFAULT_LAUNCH_OVERHEAD_MS
     jitter: Distribution = Constant(0.0)
 
     def sample(self, rng: np.random.Generator) -> float:
@@ -57,7 +63,7 @@ class DerivedLatency:
             memory_ms = (self.memory_access_mb * 8.0) / effective_bw
             memory_ms += self.memory_latency_us / 1000.0
 
-        base_ms = (compute_ms + memory_ms) * self.latency_scale
+        base_ms = (compute_ms + memory_ms) * self.latency_scale + self.launch_overhead_ms
         return max(0.0, base_ms + self.jitter.sample(rng))
 
 
@@ -116,6 +122,11 @@ class ComputeModel:
                 "does not define a positive memory bandwidth value"
             )
 
+        launch_overhead_ms = (
+            device.launch_overhead_ms
+            if device.launch_overhead_ms is not None
+            else DEFAULT_LAUNCH_OVERHEAD_MS
+        )
         return DerivedLatency(
             workload_tflop=stage.analytical.tflop,
             device_flops=device.flops,
@@ -127,6 +138,7 @@ class ComputeModel:
             memory_bandwidth_scale=penalty.memory_bandwidth_scale,
             memory_latency_us=penalty.memory_latency_us,
             latency_scale=1.0,
+            launch_overhead_ms=launch_overhead_ms,
             jitter=Distribution.from_yaml(stage.analytical.jitter),
         )
 

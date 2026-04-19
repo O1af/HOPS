@@ -160,6 +160,7 @@ class DeviceOverride:
     memory_mb: float | None = None
     flops_tflops: float | None = None
     memory_bandwidth_gbps: float | None = None
+    launch_overhead_ms: float | None = None
 
 
 @dataclass(frozen=True)
@@ -475,6 +476,7 @@ class ConfigParser:
                 memory_mb=device_raw.get("memory_mb"),
                 flops_tflops=device_raw.get("flops_tflops"),
                 memory_bandwidth_gbps=device_raw.get("memory_bandwidth_gbps"),
+                launch_overhead_ms=device_raw.get("launch_overhead_ms"),
             )
             if override.memory_mb is not None:
                 _require_positive(override.memory_mb, f"overrides.devices[{idx}].memory_mb")
@@ -484,6 +486,11 @@ class ConfigParser:
                 _require_positive(
                     override.memory_bandwidth_gbps,
                     f"overrides.devices[{idx}].memory_bandwidth_gbps",
+                )
+            if override.launch_overhead_ms is not None:
+                _require_non_negative(
+                    override.launch_overhead_ms,
+                    f"overrides.devices[{idx}].launch_overhead_ms",
                 )
             device_overrides.append(override)
 
