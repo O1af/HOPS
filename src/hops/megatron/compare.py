@@ -48,8 +48,36 @@ def _compare_mapped_metrics(
     }
 
 
+def _index_phase_breakdown(entries: list[dict]) -> dict[str, dict]:
+    indexed: dict[str, dict] = {}
+    for entry in entries:
+        key = f"stage{entry['stage']}_{entry['phase']}"
+        indexed[key] = entry
+    return indexed
+
+
+def _compare_phase_breakdowns(
+    megatron_entries: list[dict],
+    hops_entries: list[dict],
+) -> dict[str, dict[str, float | None]]:
+    meg_idx = _index_phase_breakdown(megatron_entries)
+    hops_idx = _index_phase_breakdown(hops_entries)
+    keys = sorted(set(meg_idx) | set(hops_idx))
+    result: dict[str, dict[str, float | None]] = {}
+    for key in keys:
+        meg = meg_idx.get(key, {})
+        hops = hops_idx.get(key, {})
+        meg_ms = meg.get("total_ms")
+        hops_ms = hops.get("total_ms")
+        delta = _metric_delta(meg_ms, hops_ms)
+        delta["megatron_count"] = meg.get("count")
+        delta["hops_count"] = hops.get("count")
+        result[key] = delta
+    return result
+
+
 def build_comparison(megatron_summary: dict[str, Any], hops_summary: dict[str, Any]) -> dict[str, Any]:
-    return {
+    result: dict[str, Any] = {
         "throughput": _metric_delta(
             megatron_summary["throughput"]["per_s"],
             hops_summary["throughput"]["per_s"],
@@ -87,6 +115,11 @@ def build_comparison(megatron_summary: dict[str, Any], hops_summary: dict[str, A
             ),
         },
     }
+    meg_breakdown = megatron_summary.get("phase_breakdown", [])
+    hops_breakdown = hops_summary.get("phase_breakdown", [])
+    if meg_breakdown and hops_breakdown:
+        result["phase_breakdown"] = _compare_phase_breakdowns(meg_breakdown, hops_breakdown)
+    return result
 
 
 def convert_job_dir(job_dir: str | Path) -> ConversionOutputs:

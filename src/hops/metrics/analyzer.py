@@ -12,6 +12,7 @@ from hops.metrics.summary import (
     LatencySummary,
     MemorySummary,
     OptimizerSummary,
+    PhaseBreakdownEntry,
     SimulationSummary,
     ThroughputSummary,
     TimeSummary,
@@ -230,6 +231,26 @@ class MetricsAnalyzer:
             peaks[record.stage_id] = max(peaks.get(record.stage_id, 0), record.count)
         return peaks
 
+    def phase_breakdown(self) -> list[PhaseBreakdownEntry]:
+        buckets: dict[tuple[int, str], tuple[float, int]] = {}
+        for r in self.collector.computes:
+            key = (r.stage_id, r.phase.name)
+            total, count = buckets.get(key, (0.0, 0))
+            buckets[key] = (total + r.end_time - r.start_time, count + 1)
+        device_to_stage: dict[str, int] = {}
+        for r in self.collector.computes:
+            if r.device_id not in device_to_stage:
+                device_to_stage[r.device_id] = r.stage_id
+        for r in self.collector.transfers:
+            stage = device_to_stage.get(r.src_device, -1)
+            key = (stage, f"TRANSFER_{r.phase.name}")
+            total, count = buckets.get(key, (0.0, 0))
+            buckets[key] = (total + r.end_time - r.start_time, count + 1)
+        return [
+            PhaseBreakdownEntry(stage=s, phase=p, total_ms=t, count=c)
+            for (s, p), (t, c) in sorted(buckets.items())
+        ]
+
     def optimizer_summary(self) -> OptimizerSummary:
         optimizer_compute = sum(
             record.end_time - record.start_time
@@ -296,6 +317,7 @@ class MetricsAnalyzer:
         total_compute = self.total_compute_time()
         total_transfer = self.total_transfer_time()
         contention = self.transfer_contention_stats()
+        breakdown = self.phase_breakdown()
 
         return SimulationSummary(
             completed_microbatches=self.collector.completed_microbatches,
@@ -325,4 +347,5 @@ class MetricsAnalyzer:
                 per_link=contention["per_link"],
             ),
             peak_in_flight_per_stage=self.peak_in_flight_per_stage(),
+            phase_breakdown=breakdown,
         )
