@@ -73,6 +73,9 @@ def _merge_stage_overlay(base_stages: list[dict], overlay_stages: list[dict]) ->
     return merged
 
 
+_DEEP_MERGE_KEYS = {"optimizer"}
+
+
 def merge_overlay(base: dict, overlay: dict) -> dict:
     merged: dict[str, object] = dict(base)
 
@@ -100,7 +103,12 @@ def merge_overlay(base: dict, overlay: dict) -> dict:
     for key, value in overlay.items():
         if key in ("overrides", "pipeline"):
             continue
-        merged[key] = value
+        if key in _DEEP_MERGE_KEYS and isinstance(value, dict) and isinstance(merged.get(key), dict):
+            combined = dict(merged[key])  # type: ignore[arg-type]
+            combined.update(value)
+            merged[key] = combined
+        else:
+            merged[key] = value
 
     return merged
 
