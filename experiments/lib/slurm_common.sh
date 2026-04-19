@@ -91,7 +91,14 @@ assign_ordered_nodes() {
   fi
 
   load_allocated_nodes
-  if [[ ${#NODES[@]} -ne "$stage_count" ]]; then
+  if [[ "${ALLOW_UNUSED_ALLOCATED_NODES:-0}" == "1" ]]; then
+    if [[ ${#NODES[@]} -lt "$stage_count" ]]; then
+      echo "Expected at least $stage_count allocated nodes, got ${#NODES[@]}" >&2
+      printf 'nodes: %s\n' "${NODES[@]}" >&2
+      env | sort | grep -E 'SLURM_.*NODELIST|SLURM_HET' >&2 || true
+      exit 1
+    fi
+  elif [[ ${#NODES[@]} -ne "$stage_count" ]]; then
     echo "Expected exactly $stage_count allocated nodes, got ${#NODES[@]}" >&2
     printf 'nodes: %s\n' "${NODES[@]}" >&2
     env | sort | grep -E 'SLURM_.*NODELIST|SLURM_HET' >&2 || true

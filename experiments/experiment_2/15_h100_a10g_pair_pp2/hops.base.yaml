@@ -1,0 +1,37 @@
+# Analytical template for experiment_2 H100 to A10G hetero PP2 baseline.
+
+simulation:
+  batches: 10
+  microbatches: 2
+  seed: 42
+
+pipeline:
+  schedule: 1f1b
+  precision: bf16
+  backward_factor: 2.0
+  model:
+    hidden_dim: 1024
+    seq_len: 1024
+  stages:
+    - device: h100_node0_gpu0
+      weights_mb: 6144
+      compute: { mode: analytical, tflop: 0.18, memory_mb: 384 }
+    - device: a10g_node0_gpu0
+      weights_mb: 6144
+      compute: { mode: analytical, tflop: 0.18, memory_mb: 384 }
+
+hardware:
+  devices:
+    - { id: h100_node0_gpu0, gpu: h100, node: h100_node0, socket: 0 }
+    - { id: a10g_node0_gpu0, gpu: a10g, node: a10g_node0, socket: 0 }
+  interconnect:
+    same_node: pcie
+    cross_node: ethernet
+
+optimizer:
+  enabled: false
+
+failure:
+  enabled: false
+
+output: {}
