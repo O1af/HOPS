@@ -1,6 +1,8 @@
 #!/bin/bash
 # Submit experiment_2 scenarios as a single dependency chain.
-# Set DRY_RUN=1 to print the plan without submitting.
+# Set DRY_RUN=1 to print the plan without submitting. For dry runs, prefer
+# MANIFEST=/tmp/exp2_new_sequential.tsv so checked-in Slurm results are not
+# overwritten.
 
 set -euo pipefail
 
@@ -22,6 +24,30 @@ SCENARIOS=(
   "5_small_model"
   "7_batch12"
   "6_large_model"
+  "13_a10g_pair_pp2"
+  "14_l4_pair_pp2"
+  "15_h100_a10g_pair_pp2"
+  "16_h100_l4_pair_pp2"
+  "17_a10g_l4_pair_pp2"
+  "18_mixed_pp3_h100_a10g_l4"
+  "19_mixed_pp3_l4_a10g_h100"
+  "20_mixed_pp5_h100_g4"
+  "21_mixed_pp5_g4_h100_tail"
+  "22_h100_pair_gpipe"
+  "23_h100_pair_batch8"
+  "24_g_only_gpipe_pp4"
+  "25_g_only_batch8_pp4"
+  "26_g_only_l4_front_pp4"
+  "27_g_only_alternating_pp4"
+  "28_all_nodes_batch3"
+  "29_all_nodes_batch24"
+  "30_all_nodes_gpipe_batch12"
+  "31_all_nodes_zero_bubble_batch12"
+  "32_all_nodes_seq256"
+  "33_all_nodes_seq4096"
+  "34_all_nodes_hidden2048"
+  "35_all_nodes_first_heavy_layers"
+  "36_all_nodes_last_heavy_layers"
 )
 
 submit_job() {
