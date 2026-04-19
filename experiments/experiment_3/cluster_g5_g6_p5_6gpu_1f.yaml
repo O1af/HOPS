@@ -1,0 +1,76 @@
+# Experiment 3 cluster, matching experiment 2:
+# - Head node: 1 x c6i.large
+# - g-hetero queue: 2 x g5.2xlarge A10G + 2 x g6.4xlarge L4 via targeted ODCRs
+# - p5-cap queue: 2 x p5.4xlarge H100 via existing Capacity Block
+# - Total compute GPUs: 6
+# - AZ: us-east-1f
+#
+# Capacity reservations:
+# - g5a: cr-0a9f41133887e5597
+# - g5b: cr-0d7c4c7cafc01e218
+# - g6a: cr-09e893fe733f77edb
+# - g6b: cr-08cc01a11021a4b2b
+# - p5small capacity block: cr-069abc577fef150c5
+
+Region: us-east-1
+
+Image:
+  Os: ubuntu2204
+
+HeadNode:
+  InstanceType: c6i.large
+  Ssh:
+    KeyName: megatron-key
+  Networking:
+    # Public subnet in us-east-1f
+    SubnetId: subnet-04fe51f1ae403287c
+
+Scheduling:
+  Scheduler: slurm
+  SlurmQueues:
+    - Name: g-hetero
+      CapacityType: ONDEMAND
+      Networking:
+        # Private subnet in us-east-1f
+        SubnetIds:
+          - subnet-0cbde9e3f3572b04b
+        AssignPublicIp: false
+      ComputeResources:
+        - Name: g5a
+          InstanceType: g5.2xlarge
+          MinCount: 1
+          MaxCount: 1
+          CapacityReservationTarget:
+            CapacityReservationId: cr-0a9f41133887e5597
+        - Name: g5b
+          InstanceType: g5.2xlarge
+          MinCount: 1
+          MaxCount: 1
+          CapacityReservationTarget:
+            CapacityReservationId: cr-0d7c4c7cafc01e218
+        - Name: g6a
+          InstanceType: g6.4xlarge
+          MinCount: 1
+          MaxCount: 1
+          CapacityReservationTarget:
+            CapacityReservationId: cr-09e893fe733f77edb
+        - Name: g6b
+          InstanceType: g6.4xlarge
+          MinCount: 1
+          MaxCount: 1
+          CapacityReservationTarget:
+            CapacityReservationId: cr-08cc01a11021a4b2b
+    - Name: p5-cap
+      CapacityType: CAPACITY_BLOCK
+      Networking:
+        # Private subnet in us-east-1f
+        SubnetIds:
+          - subnet-0cbde9e3f3572b04b
+        AssignPublicIp: false
+      ComputeResources:
+        - Name: p5small
+          InstanceType: p5.4xlarge
+          MinCount: 2
+          MaxCount: 2
+          CapacityReservationTarget:
+            CapacityReservationId: cr-069abc577fef150c5
