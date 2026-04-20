@@ -325,6 +325,14 @@ All tried on top of the LM-head structural commit:
   the chosen 1.4 on suite MAPE; 1.4 was Pareto-optimal across
   (LC MAPE, bubble MAE, util Spearman) — no single other k beat
   it on more than one of the three axes.
+- **BWD-asymmetric memory scaling** (memory term in `_layer_block_ms`
+  multiplied by `work_scale * 1.25` in BACKWARD). Empirical BWD/FWD
+  memory ratio in long-seq fixtures is ~2.5×, while compute is
+  ~2.0×. Tested 1.10× and 1.25×: 1.25× cut suite MAPE 44.3 → 39.6
+  (helped `no_lookahead` substantially, exp2_33 went +47 → +18) but
+  pushed LC MAPE 9.9 → 13.2 because the stages where memory was
+  already correctly bounded started over-predicting BWD time.
+  Reverted; the LC variant trades worse than the NL gain.
 
 ### Iteration 2 attempts (reverted)
 
