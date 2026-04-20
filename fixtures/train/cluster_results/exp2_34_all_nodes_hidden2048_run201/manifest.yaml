@@ -1,0 +1,5 @@
+source_scenario: experiments/experiment_2/34_all_nodes_hidden2048
+job_id: '201'
+link_bench_job_id: '203'
+link_bench_source: experiments/experiment_2/34_all_nodes_hidden2048/output/203/calibration/link_bench
+description: Extracted from 34_all_nodes_hidden2048 run 201

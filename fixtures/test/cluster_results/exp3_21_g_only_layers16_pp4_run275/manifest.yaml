@@ -1,0 +1,5 @@
+source_scenario: experiments/experiment_3/21_g_only_layers16_pp4
+job_id: '275'
+link_bench_job_id: '276'
+link_bench_source: experiments/experiment_3/21_g_only_layers16_pp4/output/276/calibration/link_bench
+description: Extracted from 21_g_only_layers16_pp4 run 275

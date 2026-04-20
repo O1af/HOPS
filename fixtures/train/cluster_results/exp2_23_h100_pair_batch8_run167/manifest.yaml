@@ -1,0 +1,5 @@
+source_scenario: experiments/experiment_2/23_h100_pair_batch8
+job_id: '167'
+link_bench_job_id: '168'
+link_bench_source: experiments/experiment_2/23_h100_pair_batch8/output/168/calibration/link_bench
+description: Extracted from 23_h100_pair_batch8 run 167

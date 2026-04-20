@@ -1,0 +1,5 @@
+source_scenario: experiments/experiment_3/41_all_nodes_layers24
+job_id: '351'
+link_bench_job_id: '353'
+link_bench_source: experiments/experiment_3/41_all_nodes_layers24/output/353/calibration/link_bench
+description: Extracted from 41_all_nodes_layers24 run 351

@@ -1,0 +1,5 @@
+source_scenario: experiments/experiment_3/20_g_only_hidden1280_pp4
+job_id: '273'
+link_bench_job_id: '274'
+link_bench_source: experiments/experiment_3/20_g_only_hidden1280_pp4/output/274/calibration/link_bench
+description: Extracted from 20_g_only_hidden1280_pp4 run 273

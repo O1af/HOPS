@@ -1,0 +1,5 @@
+source_scenario: experiments/experiment_2/28_all_nodes_batch3
+job_id: '177'
+link_bench_job_id: '179'
+link_bench_source: experiments/experiment_2/28_all_nodes_batch3/output/179/calibration/link_bench
+description: Extracted from 28_all_nodes_batch3 run 177

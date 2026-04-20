@@ -1,0 +1,5 @@
+source_scenario: experiments/experiment_3/46_diag_g_only_zero_bubble_batch10_pp4
+job_id: '369'
+link_bench_job_id: '370'
+link_bench_source: experiments/experiment_3/46_diag_g_only_zero_bubble_batch10_pp4/output/370/calibration/link_bench
+description: Extracted from 46_diag_g_only_zero_bubble_batch10_pp4 run 369

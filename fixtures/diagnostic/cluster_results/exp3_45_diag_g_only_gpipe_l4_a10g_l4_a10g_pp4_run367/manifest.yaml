@@ -1,0 +1,5 @@
+source_scenario: experiments/experiment_3/45_diag_g_only_gpipe_l4_a10g_l4_a10g_pp4
+job_id: '367'
+link_bench_job_id: '368'
+link_bench_source: experiments/experiment_3/45_diag_g_only_gpipe_l4_a10g_l4_a10g_pp4/output/368/calibration/link_bench
+description: Extracted from 45_diag_g_only_gpipe_l4_a10g_l4_a10g_pp4 run 367

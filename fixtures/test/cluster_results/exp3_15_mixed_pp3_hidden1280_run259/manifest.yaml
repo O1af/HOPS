@@ -1,0 +1,5 @@
+source_scenario: experiments/experiment_3/15_mixed_pp3_hidden1280
+job_id: '259'
+link_bench_job_id: '261'
+link_bench_source: experiments/experiment_3/15_mixed_pp3_hidden1280/output/261/calibration/link_bench
+description: Extracted from 15_mixed_pp3_hidden1280 run 259

@@ -1,0 +1,5 @@
+source_scenario: experiments/experiment_3/42_all_nodes_uneven_first4_last6
+job_id: '355'
+link_bench_job_id: '357'
+link_bench_source: experiments/experiment_3/42_all_nodes_uneven_first4_last6/output/357/calibration/link_bench
+description: Extracted from 42_all_nodes_uneven_first4_last6 run 355

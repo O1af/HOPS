@@ -1,0 +1,9 @@
+{
+  "stages": {
+    "0": "l4_node0_gpu0",
+    "1": "a10g_node0_gpu0",
+    "2": "h100_node0_gpu0",
+    "3": "a10g_node1_gpu0",
+    "4": "l4_node1_gpu0"
+  }
+}

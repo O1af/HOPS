@@ -1,0 +1,5 @@
+source_scenario: experiments/experiment_2/30_all_nodes_gpipe_batch12
+job_id: '185'
+link_bench_job_id: '187'
+link_bench_source: experiments/experiment_2/30_all_nodes_gpipe_batch12/output/187/calibration/link_bench
+description: Extracted from 30_all_nodes_gpipe_batch12 run 185

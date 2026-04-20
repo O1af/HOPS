@@ -1,0 +1,5 @@
+source_scenario: experiments/experiment_3/48_diag_pp5_zero_bubble_h100_l4_a10g_l4_a10g
+job_id: '375'
+link_bench_job_id: '377'
+link_bench_source: experiments/experiment_3/48_diag_pp5_zero_bubble_h100_l4_a10g_l4_a10g/output/377/calibration/link_bench
+description: Extracted from 48_diag_pp5_zero_bubble_h100_l4_a10g_l4_a10g run 375

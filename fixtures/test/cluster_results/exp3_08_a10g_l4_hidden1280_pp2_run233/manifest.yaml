@@ -1,0 +1,5 @@
+source_scenario: experiments/experiment_3/08_a10g_l4_hidden1280_pp2
+job_id: '233'
+link_bench_job_id: '234'
+link_bench_source: experiments/experiment_3/08_a10g_l4_hidden1280_pp2/output/234/calibration/link_bench
+description: Extracted from 08_a10g_l4_hidden1280_pp2 run 233

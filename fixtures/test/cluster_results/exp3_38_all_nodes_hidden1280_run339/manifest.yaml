@@ -1,0 +1,5 @@
+source_scenario: experiments/experiment_3/38_all_nodes_hidden1280
+job_id: '339'
+link_bench_job_id: '341'
+link_bench_source: experiments/experiment_3/38_all_nodes_hidden1280/output/341/calibration/link_bench
+description: Extracted from 38_all_nodes_hidden1280 run 339

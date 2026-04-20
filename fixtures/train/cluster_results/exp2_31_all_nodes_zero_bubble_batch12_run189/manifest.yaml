@@ -1,0 +1,5 @@
+source_scenario: experiments/experiment_2/31_all_nodes_zero_bubble_batch12
+job_id: '189'
+link_bench_job_id: '191'
+link_bench_source: experiments/experiment_2/31_all_nodes_zero_bubble_batch12/output/191/calibration/link_bench
+description: Extracted from 31_all_nodes_zero_bubble_batch12 run 189

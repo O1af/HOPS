@@ -1,0 +1,46 @@
+# Analytical template for experiment_3 24_mixed_l4_h100_a10g_h100_pp4.
+# Purpose: mixed PP4 with H100 interior and tail.
+
+simulation:
+  batches: 10
+  microbatches: 4
+  seed: 42
+
+pipeline:
+  schedule: 1f1b
+  precision: bf16
+  backward_factor: 2.0
+  model:
+    hidden_dim: 1024
+    seq_len: 1024
+  stages:
+    - device: l4_node0_gpu0
+      weights_mb: 3072
+      compute: { mode: analytical, tflop: 0.09, memory_mb: 192 }
+    - device: h100_node0_gpu0
+      weights_mb: 3072
+      compute: { mode: analytical, tflop: 0.09, memory_mb: 192 }
+    - device: a10g_node0_gpu0
+      weights_mb: 3072
+      compute: { mode: analytical, tflop: 0.09, memory_mb: 192 }
+    - device: h100_node1_gpu0
+      weights_mb: 3072
+      compute: { mode: analytical, tflop: 0.09, memory_mb: 192 }
+
+hardware:
+  devices:
+    - { id: l4_node0_gpu0, gpu: l4, node: l4_node0, socket: 0 }
+    - { id: h100_node0_gpu0, gpu: h100, node: h100_node0, socket: 0 }
+    - { id: a10g_node0_gpu0, gpu: a10g, node: a10g_node0, socket: 0 }
+    - { id: h100_node1_gpu0, gpu: h100, node: h100_node1, socket: 0 }
+  interconnect:
+    same_node: pcie
+    cross_node: ethernet
+
+optimizer:
+  enabled: false
+
+failure:
+  enabled: false
+
+output: {}

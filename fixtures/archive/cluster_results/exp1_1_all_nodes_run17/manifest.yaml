@@ -1,0 +1,5 @@
+source_scenario: experiments/experiment_1/1_all_nodes
+job_id: '17'
+link_bench_job_id: '18'
+link_bench_source: experiments/experiment_1/1_all_nodes/output/18/calibration/link_bench
+description: Extracted from 1_all_nodes run 17

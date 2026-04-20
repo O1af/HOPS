@@ -1,0 +1,77 @@
+{
+  "bubble_ratio": 0.6731608674363181,
+  "completed_microbatches": 90,
+  "contention": {
+    "global_contended_transfer_fraction": 0.0,
+    "global_peak_concurrency": 1.0,
+    "per_link": {
+      "a10g_node0_gpu0->l4_node0_gpu0": {
+        "contended_transfer_fraction": 0.0,
+        "peak_concurrency": 1.0,
+        "transfer_count": 90.0
+      },
+      "h100_node0_gpu0->l4_node0_gpu0": {
+        "contended_transfer_fraction": 0.0,
+        "peak_concurrency": 1.0,
+        "transfer_count": 90.0
+      },
+      "l4_node0_gpu0->a10g_node0_gpu0": {
+        "contended_transfer_fraction": 0.0,
+        "peak_concurrency": 1.0,
+        "transfer_count": 90.0
+      },
+      "l4_node0_gpu0->h100_node0_gpu0": {
+        "contended_transfer_fraction": 0.0,
+        "peak_concurrency": 1.0,
+        "transfer_count": 90.0
+      }
+    }
+  },
+  "failures": {
+    "count": 0,
+    "lost_work_ms": null,
+    "total_downtime_ms": 0
+  },
+  "latency_ms": {
+    "mean_ms": 108.10054317777778,
+    "p50_ms": 109.87734350000028,
+    "p99_ms": 135.09279176999996
+  },
+  "memory": {
+    "peak_per_device_mb": {}
+  },
+  "optimizer": {
+    "allreduce_time_ms": 0,
+    "weight_update_time_ms": 1156.4859520000032
+  },
+  "peak_in_flight_per_stage": {},
+  "throughput": {
+    "per_ms": 0.01163834419118667,
+    "per_s": 11.63834419118667
+  },
+  "time_ms": {
+    "communication_overhead_ratio": 0.007947895366641075,
+    "compute_ms": 7788.972570000007,
+    "makespan_ms": 7939.391132,
+    "trace_duration_ms": 7939.391132,
+    "transfer_ms": 61.90593899999749
+  },
+  "utilization": {
+    "per_device": {
+      "a10g_node0_gpu0": 0.4672734700079521,
+      "h100_node0_gpu0": 0.23481747894820823,
+      "l4_node0_gpu0": 0.2784264487348852
+    },
+    "per_link": {
+      "a10g_node0_gpu0->l4_node0_gpu0": 0.002440690435554558,
+      "h100_node0_gpu0->l4_node0_gpu0": 0.0018701046154733412,
+      "l4_node0_gpu0->a10g_node0_gpu0": 0.0016157249072025674,
+      "l4_node0_gpu0->h100_node0_gpu0": 0.0018707957264047677
+    },
+    "per_stage": {
+      "0": 0.23481747894820823,
+      "1": 0.2784264487348852,
+      "2": 0.4672734700079521
+    }
+  }
+}

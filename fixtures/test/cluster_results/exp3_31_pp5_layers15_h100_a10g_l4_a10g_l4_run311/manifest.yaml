@@ -1,0 +1,5 @@
+source_scenario: experiments/experiment_3/31_pp5_layers15_h100_a10g_l4_a10g_l4
+job_id: '311'
+link_bench_job_id: '313'
+link_bench_source: experiments/experiment_3/31_pp5_layers15_h100_a10g_l4_a10g_l4/output/313/calibration/link_bench
+description: Extracted from 31_pp5_layers15_h100_a10g_l4_a10g_l4 run 311

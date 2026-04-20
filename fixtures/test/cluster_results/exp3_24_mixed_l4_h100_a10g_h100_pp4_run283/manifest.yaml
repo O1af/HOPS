@@ -1,0 +1,5 @@
+source_scenario: experiments/experiment_3/24_mixed_l4_h100_a10g_h100_pp4
+job_id: '283'
+link_bench_job_id: '285'
+link_bench_source: experiments/experiment_3/24_mixed_l4_h100_a10g_h100_pp4/output/285/calibration/link_bench
+description: Extracted from 24_mixed_l4_h100_a10g_h100_pp4 run 283

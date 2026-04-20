@@ -1,0 +1,5 @@
+source_scenario: experiments/experiment_2/5_small_model
+job_id: '123'
+link_bench_job_id: '125'
+link_bench_source: experiments/experiment_2/5_small_model/output/125/calibration/link_bench
+description: Extracted from 5_small_model run 123

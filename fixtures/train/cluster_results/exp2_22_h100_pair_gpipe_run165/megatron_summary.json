@@ -1,0 +1,63 @@
+{
+  "bubble_ratio": 0.746555395366094,
+  "completed_microbatches": 36,
+  "contention": {
+    "global_contended_transfer_fraction": 0.0,
+    "global_peak_concurrency": 1.0,
+    "per_link": {
+      "h100_node0_gpu0->h100_node1_gpu0": {
+        "contended_transfer_fraction": 0.0,
+        "peak_concurrency": 1.0,
+        "transfer_count": 36.0
+      },
+      "h100_node1_gpu0->h100_node0_gpu0": {
+        "contended_transfer_fraction": 0.0,
+        "peak_concurrency": 1.0,
+        "transfer_count": 36.0
+      }
+    }
+  },
+  "failures": {
+    "count": 0,
+    "lost_work_ms": null,
+    "total_downtime_ms": 0
+  },
+  "latency_ms": {
+    "mean_ms": 56.648987111111104,
+    "p50_ms": 57.74436850000005,
+    "p99_ms": 64.13666715000008
+  },
+  "memory": {
+    "peak_per_device_mb": {}
+  },
+  "optimizer": {
+    "allreduce_time_ms": 0,
+    "weight_update_time_ms": 307.0167359999989
+  },
+  "peak_in_flight_per_stage": {},
+  "throughput": {
+    "per_ms": 0.009482912441886052,
+    "per_s": 9.482912441886052
+  },
+  "time_ms": {
+    "communication_overhead_ratio": 0.006097501786868972,
+    "compute_ms": 1987.0291839999986,
+    "makespan_ms": 3920.046329,
+    "trace_duration_ms": 3920.046329,
+    "transfer_ms": 12.115914000000787
+  },
+  "utilization": {
+    "per_device": {
+      "h100_node0_gpu0": 0.2489369681120419,
+      "h100_node1_gpu0": 0.25795224115577
+    },
+    "per_link": {
+      "h100_node0_gpu0->h100_node1_gpu0": 0.0014707127202426013,
+      "h100_node1_gpu0->h100_node0_gpu0": 0.001620045139012482
+    },
+    "per_stage": {
+      "0": 0.2489369681120419,
+      "1": 0.25795224115577
+    }
+  }
+}

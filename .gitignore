@@ -28,4 +28,3 @@ megatron-key.pem
 
 Megatron-LM/
 experiments/experiment_*/sequential_jobs.tsv
-fixtures/

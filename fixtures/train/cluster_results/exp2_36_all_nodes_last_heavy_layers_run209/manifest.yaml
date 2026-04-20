@@ -1,0 +1,5 @@
+source_scenario: experiments/experiment_2/36_all_nodes_last_heavy_layers
+job_id: '209'
+link_bench_job_id: '211'
+link_bench_source: experiments/experiment_2/36_all_nodes_last_heavy_layers/output/211/calibration/link_bench
+description: Extracted from 36_all_nodes_last_heavy_layers run 209

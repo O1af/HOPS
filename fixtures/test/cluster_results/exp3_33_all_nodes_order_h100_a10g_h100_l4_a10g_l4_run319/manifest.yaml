@@ -1,0 +1,5 @@
+source_scenario: experiments/experiment_3/33_all_nodes_order_h100_a10g_h100_l4_a10g_l4
+job_id: '319'
+link_bench_job_id: '321'
+link_bench_source: experiments/experiment_3/33_all_nodes_order_h100_a10g_h100_l4_a10g_l4/output/321/calibration/link_bench
+description: Extracted from 33_all_nodes_order_h100_a10g_h100_l4_a10g_l4 run 319

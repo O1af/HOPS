@@ -1,0 +1,5 @@
+source_scenario: experiments/experiment_3/06_l4_pair_batch7_pp2
+job_id: '227'
+link_bench_job_id: '228'
+link_bench_source: experiments/experiment_3/06_l4_pair_batch7_pp2/output/228/calibration/link_bench
+description: Extracted from 06_l4_pair_batch7_pp2 run 227

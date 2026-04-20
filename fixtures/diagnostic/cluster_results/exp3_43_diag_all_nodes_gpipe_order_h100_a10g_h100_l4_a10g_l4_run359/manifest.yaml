@@ -1,0 +1,6 @@
+source_scenario: experiments/experiment_3/43_diag_all_nodes_gpipe_order_h100_a10g_h100_l4_a10g_l4
+job_id: '359'
+link_bench_job_id: '361'
+link_bench_source: experiments/experiment_3/43_diag_all_nodes_gpipe_order_h100_a10g_h100_l4_a10g_l4/output/361/calibration/link_bench
+description: Extracted from 43_diag_all_nodes_gpipe_order_h100_a10g_h100_l4_a10g_l4
+  run 359

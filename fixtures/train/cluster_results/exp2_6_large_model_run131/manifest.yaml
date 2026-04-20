@@ -1,0 +1,5 @@
+source_scenario: experiments/experiment_2/6_large_model
+job_id: '131'
+link_bench_job_id: '133'
+link_bench_source: experiments/experiment_2/6_large_model/output/133/calibration/link_bench
+description: Extracted from 6_large_model run 131

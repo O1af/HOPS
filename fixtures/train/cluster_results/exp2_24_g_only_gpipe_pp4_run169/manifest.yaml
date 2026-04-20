@@ -1,0 +1,5 @@
+source_scenario: experiments/experiment_2/24_g_only_gpipe_pp4
+job_id: '169'
+link_bench_job_id: '170'
+link_bench_source: experiments/experiment_2/24_g_only_gpipe_pp4/output/170/calibration/link_bench
+description: Extracted from 24_g_only_gpipe_pp4 run 169

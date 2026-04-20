@@ -1,0 +1,5 @@
+source_scenario: experiments/experiment_2/12_g_only_zero_bubble
+job_id: '67'
+link_bench_job_id: '68'
+link_bench_source: experiments/experiment_2/12_g_only_zero_bubble/output/68/calibration/link_bench
+description: Extracted from 12_g_only_zero_bubble run 67

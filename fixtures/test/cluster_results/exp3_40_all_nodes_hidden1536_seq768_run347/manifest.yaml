@@ -1,0 +1,5 @@
+source_scenario: experiments/experiment_3/40_all_nodes_hidden1536_seq768
+job_id: '347'
+link_bench_job_id: '349'
+link_bench_source: experiments/experiment_3/40_all_nodes_hidden1536_seq768/output/349/calibration/link_bench
+description: Extracted from 40_all_nodes_hidden1536_seq768 run 347

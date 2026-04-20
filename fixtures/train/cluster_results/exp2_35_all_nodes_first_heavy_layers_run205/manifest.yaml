@@ -1,0 +1,5 @@
+source_scenario: experiments/experiment_2/35_all_nodes_first_heavy_layers
+job_id: '205'
+link_bench_job_id: '207'
+link_bench_source: experiments/experiment_2/35_all_nodes_first_heavy_layers/output/207/calibration/link_bench
+description: Extracted from 35_all_nodes_first_heavy_layers run 205

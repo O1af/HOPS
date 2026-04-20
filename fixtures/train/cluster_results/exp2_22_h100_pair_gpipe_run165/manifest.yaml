@@ -1,0 +1,5 @@
+source_scenario: experiments/experiment_2/22_h100_pair_gpipe
+job_id: '165'
+link_bench_job_id: '166'
+link_bench_source: experiments/experiment_2/22_h100_pair_gpipe/output/166/calibration/link_bench
+description: Extracted from 22_h100_pair_gpipe run 165

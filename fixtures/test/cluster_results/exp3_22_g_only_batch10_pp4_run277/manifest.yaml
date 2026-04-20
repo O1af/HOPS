@@ -1,0 +1,5 @@
+source_scenario: experiments/experiment_3/22_g_only_batch10_pp4
+job_id: '277'
+link_bench_job_id: '278'
+link_bench_source: experiments/experiment_3/22_g_only_batch10_pp4/output/278/calibration/link_bench
+description: Extracted from 22_g_only_batch10_pp4 run 277

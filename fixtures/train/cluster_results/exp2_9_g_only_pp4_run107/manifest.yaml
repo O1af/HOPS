@@ -1,0 +1,5 @@
+source_scenario: experiments/experiment_2/9_g_only_pp4
+job_id: '107'
+link_bench_job_id: '108'
+link_bench_source: experiments/experiment_2/9_g_only_pp4/output/108/calibration/link_bench
+description: Extracted from 9_g_only_pp4 run 107

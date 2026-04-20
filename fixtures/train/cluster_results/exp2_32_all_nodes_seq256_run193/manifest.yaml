@@ -1,0 +1,5 @@
+source_scenario: experiments/experiment_2/32_all_nodes_seq256
+job_id: '193'
+link_bench_job_id: '195'
+link_bench_source: experiments/experiment_2/32_all_nodes_seq256/output/195/calibration/link_bench
+description: Extracted from 32_all_nodes_seq256 run 193

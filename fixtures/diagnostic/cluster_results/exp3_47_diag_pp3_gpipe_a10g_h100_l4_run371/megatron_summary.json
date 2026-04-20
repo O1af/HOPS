@@ -1,0 +1,77 @@
+{
+  "bubble_ratio": 0.7485916439960165,
+  "completed_microbatches": 54,
+  "contention": {
+    "global_contended_transfer_fraction": 0.0,
+    "global_peak_concurrency": 1.0,
+    "per_link": {
+      "a10g_node0_gpu0->h100_node0_gpu0": {
+        "contended_transfer_fraction": 0.0,
+        "peak_concurrency": 1.0,
+        "transfer_count": 54.0
+      },
+      "h100_node0_gpu0->a10g_node0_gpu0": {
+        "contended_transfer_fraction": 0.0,
+        "peak_concurrency": 1.0,
+        "transfer_count": 54.0
+      },
+      "h100_node0_gpu0->l4_node0_gpu0": {
+        "contended_transfer_fraction": 0.0,
+        "peak_concurrency": 1.0,
+        "transfer_count": 54.0
+      },
+      "l4_node0_gpu0->h100_node0_gpu0": {
+        "contended_transfer_fraction": 0.0,
+        "peak_concurrency": 1.0,
+        "transfer_count": 54.0
+      }
+    }
+  },
+  "failures": {
+    "count": 0,
+    "lost_work_ms": null,
+    "total_downtime_ms": 0
+  },
+  "latency_ms": {
+    "mean_ms": 101.68691105555554,
+    "p50_ms": 101.27709049999999,
+    "p99_ms": 128.1672161699999
+  },
+  "memory": {
+    "peak_per_device_mb": {}
+  },
+  "optimizer": {
+    "allreduce_time_ms": 0,
+    "weight_update_time_ms": 1364.174850999999
+  },
+  "peak_in_flight_per_stage": {},
+  "throughput": {
+    "per_ms": 0.008192932724282771,
+    "per_s": 8.192932724282771
+  },
+  "time_ms": {
+    "communication_overhead_ratio": 0.007299390618032984,
+    "compute_ms": 5141.791961000002,
+    "makespan_ms": 6817.317773,
+    "trace_duration_ms": 6817.317773,
+    "transfer_ms": 37.53194800000083
+  },
+  "utilization": {
+    "per_device": {
+      "a10g_node0_gpu0": 0.23614676704318616,
+      "h100_node0_gpu0": 0.11549933657463958,
+      "l4_node0_gpu0": 0.40257896439412444
+    },
+    "per_link": {
+      "a10g_node0_gpu0->h100_node0_gpu0": 0.0017633957225249503,
+      "h100_node0_gpu0->a10g_node0_gpu0": 0.0011939133939499675,
+      "h100_node0_gpu0->l4_node0_gpu0": 0.0010820526848866767,
+      "l4_node0_gpu0->h100_node0_gpu0": 0.0014660215839701239
+    },
+    "per_stage": {
+      "0": 0.23614676704318616,
+      "1": 0.11549933657463958,
+      "2": 0.40257896439412444
+    }
+  }
+}

@@ -1,0 +1,5 @@
+source_scenario: experiments/experiment_3/30_pp5_hidden1280_a10g_l4_h100_a10g_l4
+job_id: '307'
+link_bench_job_id: '309'
+link_bench_source: experiments/experiment_3/30_pp5_hidden1280_a10g_l4_h100_a10g_l4/output/309/calibration/link_bench
+description: Extracted from 30_pp5_hidden1280_a10g_l4_h100_a10g_l4 run 307
