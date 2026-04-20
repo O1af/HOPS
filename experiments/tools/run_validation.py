@@ -21,7 +21,7 @@ If link_bench results are not found, link_calibrated and trace_replay are
 skipped and the manifest records that.
 
 Usage:
-    uv run python experiments/tools/run_validation.py \\
+    python experiments/tools/run_validation.py \\
         --scenario experiments/experiment_1/1_all_nodes \\
         --job-id 12 \\
         [--link-bench-dir <path>]
@@ -33,6 +33,7 @@ import argparse
 import json
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import compare_run
@@ -49,7 +50,8 @@ from parse_link_bench import (
 
 def _run_hops(config_path: Path, summary_path: Path) -> None:
     cmd = [
-        "uv", "run", "python", "main.py",
+        sys.executable,
+        str(repo_root() / "main.py"),
         "--config", str(config_path),
         "--no-viz",
         "--summary-json", str(summary_path),
