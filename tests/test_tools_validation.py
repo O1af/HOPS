@@ -856,18 +856,17 @@ def test_analytical_stage_still_scales_with_precision() -> None:
 
     from hops.core.types import Phase
 
-    raw_bf16 = _base_config_dict()
-    raw_bf16["pipeline"]["precision"] = "bf16"
-    for s in raw_bf16["pipeline"]["stages"]:
-        s["compute"]["memory_mb"] = 0.0
+    def _compute_bound_config(precision: str) -> dict:
+        raw = _base_config_dict()
+        raw["pipeline"]["precision"] = precision
+        raw["pipeline"]["model"] = {"hidden_dim": 4096, "seq_len": 2048}
+        for s in raw["pipeline"]["stages"]:
+            s["compute"]["memory_mb"] = 0.0
+            s["compute"]["tflop"] = 30.0
+        return raw
 
-    raw_fp32 = _base_config_dict()
-    raw_fp32["pipeline"]["precision"] = "fp32"
-    for s in raw_fp32["pipeline"]["stages"]:
-        s["compute"]["memory_mb"] = 0.0
-
-    model_bf16 = _compute_model_from_raw(raw_bf16)
-    model_fp32 = _compute_model_from_raw(raw_fp32)
+    model_bf16 = _compute_model_from_raw(_compute_bound_config("bf16"))
+    model_fp32 = _compute_model_from_raw(_compute_bound_config("fp32"))
     fwd_bf16 = model_bf16.sample(0, Phase.FORWARD, np.random.default_rng(0))
     fwd_fp32 = model_fp32.sample(0, Phase.FORWARD, np.random.default_rng(0))
     from hops.latency.compute_model import DEFAULT_LAUNCH_OVERHEAD_MS
