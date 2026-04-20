@@ -44,25 +44,25 @@
     },
     "exp2_10_all_nodes_gpipe_run97": {
       "no_lookahead": {
-        "throughput_error_pct": 53.67,
-        "bubble_pp_delta": -21.21,
-        "util_spearman_rho": 0.736
+        "throughput_error_pct": 52.87,
+        "bubble_pp_delta": -21.57,
+        "util_spearman_rho": 0.794
       },
       "link_calibrated": {
-        "throughput_error_pct": -5.39,
-        "bubble_pp_delta": -7.64,
+        "throughput_error_pct": -5.74,
+        "bubble_pp_delta": -7.89,
         "util_spearman_rho": 0.714
       }
     },
     "exp2_11_all_nodes_zero_bubble_run101": {
       "no_lookahead": {
-        "throughput_error_pct": 96.99,
-        "bubble_pp_delta": -32.73,
-        "util_spearman_rho": 0.543
+        "throughput_error_pct": 94.67,
+        "bubble_pp_delta": -32.83,
+        "util_spearman_rho": 0.377
       },
       "link_calibrated": {
-        "throughput_error_pct": 1.52,
-        "bubble_pp_delta": -9.97,
+        "throughput_error_pct": 1.21,
+        "bubble_pp_delta": -10.25,
         "util_spearman_rho": 0.486
       }
     },
@@ -128,25 +128,25 @@
     },
     "exp2_15_h100_a10g_pair_pp2_run139": {
       "no_lookahead": {
-        "throughput_error_pct": 218.56,
-        "bubble_pp_delta": -36.54,
+        "throughput_error_pct": 211.75,
+        "bubble_pp_delta": -37.34,
         "util_spearman_rho": 1.0
       },
       "link_calibrated": {
-        "throughput_error_pct": 6.76,
-        "bubble_pp_delta": -1.67,
+        "throughput_error_pct": 5.98,
+        "bubble_pp_delta": -2.19,
         "util_spearman_rho": 1.0
       }
     },
     "exp2_16_h100_l4_pair_pp2_run143": {
       "no_lookahead": {
-        "throughput_error_pct": 58.93,
-        "bubble_pp_delta": -19.21,
+        "throughput_error_pct": 56.82,
+        "bubble_pp_delta": -19.77,
         "util_spearman_rho": 1.0
       },
       "link_calibrated": {
-        "throughput_error_pct": -11.26,
-        "bubble_pp_delta": -5.09,
+        "throughput_error_pct": -11.92,
+        "bubble_pp_delta": -5.5,
         "util_spearman_rho": 1.0
       }
     },
@@ -164,25 +164,25 @@
     },
     "exp2_18_mixed_pp3_h100_a10g_l4_run149": {
       "no_lookahead": {
-        "throughput_error_pct": 53.46,
-        "bubble_pp_delta": -16.62,
+        "throughput_error_pct": 52.28,
+        "bubble_pp_delta": -17.01,
         "util_spearman_rho": 1.0
       },
       "link_calibrated": {
-        "throughput_error_pct": -9.11,
-        "bubble_pp_delta": -3.77,
+        "throughput_error_pct": -9.52,
+        "bubble_pp_delta": -4.06,
         "util_spearman_rho": 1.0
       }
     },
     "exp2_19_mixed_pp3_l4_a10g_h100_run153": {
       "no_lookahead": {
-        "throughput_error_pct": 62.11,
-        "bubble_pp_delta": -27.41,
+        "throughput_error_pct": 60.67,
+        "bubble_pp_delta": -27.81,
         "util_spearman_rho": 1.0
       },
       "link_calibrated": {
         "throughput_error_pct": -18.95,
-        "bubble_pp_delta": -5.48,
+        "bubble_pp_delta": -5.94,
         "util_spearman_rho": 0.5
       }
     },
@@ -200,61 +200,59 @@
     },
     "exp2_1_all_nodes_run93": {
       "no_lookahead": {
-        "throughput_error_pct": 51.98,
-        "bubble_pp_delta": -21.56,
-        "util_spearman_rho": 0.478
+        "throughput_error_pct": 51.23,
+        "bubble_pp_delta": -21.95,
+        "util_spearman_rho": 0.429
       },
       "link_calibrated": {
-        "throughput_error_pct": -3.71,
-        "bubble_pp_delta": -8.74,
+        "throughput_error_pct": -4.08,
+        "bubble_pp_delta": -9.0,
         "util_spearman_rho": 0.486
       }
     },
     "exp2_20_mixed_pp5_h100_g4_run157": {
       "no_lookahead": {
-        "throughput_error_pct": 54.79,
-        "bubble_pp_delta": -21.74,
+        "throughput_error_pct": 54.17,
+        "bubble_pp_delta": -21.91,
         "util_spearman_rho": 0.359
       },
       "link_calibrated": {
-        "throughput_error_pct": -3.19,
-        "bubble_pp_delta": -8.59,
+        "throughput_error_pct": -3.41,
+        "bubble_pp_delta": -8.74,
         "util_spearman_rho": 0.7
       }
     },
     "exp2_21_mixed_pp5_g4_h100_tail_run161": {
       "no_lookahead": {
-        "throughput_error_pct": 63.67,
-        "bubble_pp_delta": -29.13,
+        "throughput_error_pct": 62.47,
+        "bubble_pp_delta": -29.15,
         "util_spearman_rho": -0.821
       },
       "link_calibrated": {
         "throughput_error_pct": -18.16,
-        "bubble_pp_delta": -8.03,
+        "bubble_pp_delta": -8.22,
         "util_spearman_rho": -0.6
       }
     },
     "exp2_22_h100_pair_gpipe_run165": {
       "no_lookahead": {
-        "throughput_error_pct": 168.94,
-        "bubble_pp_delta": -39.57,
-        "util_spearman_rho": 1.0
+        "throughput_error_pct": 148.98,
+        "bubble_pp_delta": -39.7
       },
       "link_calibrated": {
-        "throughput_error_pct": 0.85,
-        "bubble_pp_delta": -2.96,
+        "throughput_error_pct": -2.09,
+        "bubble_pp_delta": -4.08,
         "util_spearman_rho": 1.0
       }
     },
     "exp2_23_h100_pair_batch8_run167": {
       "no_lookahead": {
-        "throughput_error_pct": 55.38,
-        "bubble_pp_delta": -35.33,
-        "util_spearman_rho": -1.0
+        "throughput_error_pct": 43.61,
+        "bubble_pp_delta": -35.36
       },
       "link_calibrated": {
-        "throughput_error_pct": -1.69,
-        "bubble_pp_delta": -5.04,
+        "throughput_error_pct": -6.54,
+        "bubble_pp_delta": -6.55,
         "util_spearman_rho": 1.0
       }
     },
@@ -308,37 +306,37 @@
     },
     "exp2_28_all_nodes_batch3_run177": {
       "no_lookahead": {
-        "throughput_error_pct": 94.32,
-        "bubble_pp_delta": -17.82,
-        "util_spearman_rho": 0.928
+        "throughput_error_pct": 92.67,
+        "bubble_pp_delta": -17.99,
+        "util_spearman_rho": 0.912
       },
       "link_calibrated": {
-        "throughput_error_pct": -10.4,
-        "bubble_pp_delta": -3.99,
+        "throughput_error_pct": -10.76,
+        "bubble_pp_delta": -4.12,
         "util_spearman_rho": 0.943
       }
     },
     "exp2_29_all_nodes_batch24_run181": {
       "no_lookahead": {
-        "throughput_error_pct": 28.12,
-        "bubble_pp_delta": -27.06,
-        "util_spearman_rho": 0.371
+        "throughput_error_pct": 27.88,
+        "bubble_pp_delta": -27.77,
+        "util_spearman_rho": 0.353
       },
       "link_calibrated": {
-        "throughput_error_pct": 5.05,
-        "bubble_pp_delta": -17.6,
+        "throughput_error_pct": 4.87,
+        "bubble_pp_delta": -18.19,
         "util_spearman_rho": 0.486
       }
     },
     "exp2_2_reverse_order_run111": {
       "no_lookahead": {
-        "throughput_error_pct": 28.4,
-        "bubble_pp_delta": -25.1,
-        "util_spearman_rho": 0.319
+        "throughput_error_pct": 27.52,
+        "bubble_pp_delta": -25.45,
+        "util_spearman_rho": 0.377
       },
       "link_calibrated": {
         "throughput_error_pct": -18.98,
-        "bubble_pp_delta": -10.01,
+        "bubble_pp_delta": -10.45,
         "util_spearman_rho": 0.2
       }
     },
@@ -356,37 +354,37 @@
     },
     "exp2_30_all_nodes_gpipe_batch12_run185": {
       "no_lookahead": {
-        "throughput_error_pct": 38.34,
-        "bubble_pp_delta": -24.97,
-        "util_spearman_rho": 0.609
+        "throughput_error_pct": 37.97,
+        "bubble_pp_delta": -25.55,
+        "util_spearman_rho": 0.657
       },
       "link_calibrated": {
-        "throughput_error_pct": -0.32,
-        "bubble_pp_delta": -12.36,
+        "throughput_error_pct": -0.58,
+        "bubble_pp_delta": -12.78,
         "util_spearman_rho": 0.543
       }
     },
     "exp2_31_all_nodes_zero_bubble_batch12_run189": {
       "no_lookahead": {
-        "throughput_error_pct": 57.01,
-        "bubble_pp_delta": -32.61,
-        "util_spearman_rho": 0.412
+        "throughput_error_pct": 55.21,
+        "bubble_pp_delta": -32.73,
+        "util_spearman_rho": 0.588
       },
       "link_calibrated": {
-        "throughput_error_pct": 8.12,
-        "bubble_pp_delta": -16.82,
+        "throughput_error_pct": 7.89,
+        "bubble_pp_delta": -17.31,
         "util_spearman_rho": 0.543
       }
     },
     "exp2_32_all_nodes_seq256_run193": {
       "no_lookahead": {
-        "throughput_error_pct": 73.67,
-        "bubble_pp_delta": -26.6,
-        "util_spearman_rho": 0.837
+        "throughput_error_pct": 70.45,
+        "bubble_pp_delta": -27.48,
+        "util_spearman_rho": 0.339
       },
       "link_calibrated": {
-        "throughput_error_pct": -10.47,
-        "bubble_pp_delta": -6.87,
+        "throughput_error_pct": -11.3,
+        "bubble_pp_delta": -7.52,
         "util_spearman_rho": 0.314
       }
     },
@@ -416,37 +414,37 @@
     },
     "exp2_35_all_nodes_first_heavy_layers_run205": {
       "no_lookahead": {
-        "throughput_error_pct": 46.19,
-        "bubble_pp_delta": -21.18,
+        "throughput_error_pct": 41.9,
+        "bubble_pp_delta": -21.1,
         "util_spearman_rho": 0.667
       },
       "link_calibrated": {
-        "throughput_error_pct": -4.32,
-        "bubble_pp_delta": -7.93,
+        "throughput_error_pct": -6.36,
+        "bubble_pp_delta": -8.07,
         "util_spearman_rho": 0.714
       }
     },
     "exp2_36_all_nodes_last_heavy_layers_run209": {
       "no_lookahead": {
-        "throughput_error_pct": -8.78,
-        "bubble_pp_delta": -6.91,
+        "throughput_error_pct": -8.96,
+        "bubble_pp_delta": -7.09,
         "util_spearman_rho": 0.794
       },
       "link_calibrated": {
-        "throughput_error_pct": -30.19,
-        "bubble_pp_delta": -3.1,
+        "throughput_error_pct": -30.31,
+        "bubble_pp_delta": -3.24,
         "util_spearman_rho": 0.714
       }
     },
     "exp2_3_interleaved_run115": {
       "no_lookahead": {
-        "throughput_error_pct": 73.68,
-        "bubble_pp_delta": -27.32,
-        "util_spearman_rho": 0.058
+        "throughput_error_pct": 72.59,
+        "bubble_pp_delta": -27.66,
+        "util_spearman_rho": 0.143
       },
       "link_calibrated": {
-        "throughput_error_pct": -4.47,
-        "bubble_pp_delta": -8.97,
+        "throughput_error_pct": -4.81,
+        "bubble_pp_delta": -9.22,
         "util_spearman_rho": 0.029
       }
     },
@@ -464,13 +462,13 @@
     },
     "exp2_4_slow_middle_run119": {
       "no_lookahead": {
-        "throughput_error_pct": 17.06,
-        "bubble_pp_delta": -21.6,
+        "throughput_error_pct": 14.91,
+        "bubble_pp_delta": -21.39,
         "util_spearman_rho": -0.609
       },
       "link_calibrated": {
-        "throughput_error_pct": -25.11,
-        "bubble_pp_delta": -7.85,
+        "throughput_error_pct": -25.26,
+        "bubble_pp_delta": -8.18,
         "util_spearman_rho": -0.543
       }
     },
@@ -488,13 +486,13 @@
     },
     "exp2_5_small_model_run123": {
       "no_lookahead": {
-        "throughput_error_pct": 58.53,
-        "bubble_pp_delta": -28.1,
-        "util_spearman_rho": 0.206
+        "throughput_error_pct": 57.35,
+        "bubble_pp_delta": -28.33,
+        "util_spearman_rho": 0.232
       },
       "link_calibrated": {
-        "throughput_error_pct": -15.8,
-        "bubble_pp_delta": -9.13,
+        "throughput_error_pct": -16.06,
+        "bubble_pp_delta": -9.36,
         "util_spearman_rho": 0.2
       }
     },
@@ -536,13 +534,13 @@
     },
     "exp2_7_batch12_run127": {
       "no_lookahead": {
-        "throughput_error_pct": 39.79,
-        "bubble_pp_delta": -25.99,
-        "util_spearman_rho": 0.522
+        "throughput_error_pct": 39.38,
+        "bubble_pp_delta": -26.56,
+        "util_spearman_rho": 0.551
       },
       "link_calibrated": {
-        "throughput_error_pct": -0.37,
-        "bubble_pp_delta": -12.87,
+        "throughput_error_pct": -0.63,
+        "bubble_pp_delta": -13.28,
         "util_spearman_rho": 0.543
       }
     },
@@ -560,13 +558,12 @@
     },
     "exp2_8_h100_pair_pp2_run105": {
       "no_lookahead": {
-        "throughput_error_pct": 175.72,
-        "bubble_pp_delta": -40.36,
-        "util_spearman_rho": -1.0
+        "throughput_error_pct": 155.05,
+        "bubble_pp_delta": -40.44
       },
       "link_calibrated": {
-        "throughput_error_pct": 1.09,
-        "bubble_pp_delta": -2.68,
+        "throughput_error_pct": -1.83,
+        "bubble_pp_delta": -3.8,
         "util_spearman_rho": 1.0
       }
     },
@@ -1183,8 +1180,8 @@
     }
   },
   "suite": {
-    "throughput_mape": 41.92,
-    "bubble_mae_pp": 16.68,
-    "util_spearman_mean": 0.526
+    "throughput_mape": 40.88,
+    "bubble_mae_pp": 16.93,
+    "util_spearman_mean": 0.56
   }
 }

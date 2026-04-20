@@ -38,7 +38,7 @@ DEFAULT_LAUNCH_OVERHEAD_MS = 1.5
 # kernel has a sub-ms launch+sync tail that pure roofline (compute/memory)
 # misses entirely. This term acts as a third floor in the roofline max() so
 # it only matters when the stage is *neither* compute- nor memory-bound.
-DEFAULT_PER_LAYER_KERNEL_MS = 1.0
+DEFAULT_PER_LAYER_KERNEL_MS = 1.1
 
 
 @dataclass
