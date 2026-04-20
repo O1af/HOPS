@@ -1,6 +1,7 @@
 # HOPS AutoResearch Playbook
 
-Improve HOPS prediction accuracy against real Megatron-LM traces. Current
+Improve HOPS prediction accuracy against real Megatron-LM traces by fixing
+the simulator's modeling logic — not just tuning constants. Current
 no_lookahead MAPE is ~92% (link_calibrated: ~12%). Reduce the analytical
 model's error toward single digits while preserving rank-order fidelity.
 Work only on the **train split**. The test set is invisible to you.
@@ -70,24 +71,29 @@ uv run python experiments/tools/inspect_fixture.py --fixture <name> --phase FORW
 
 ### HYPOTHESIZE — Falsifiable prediction
 
-Good: *"A10G forward compute is 3x overestimated because efficiency 0.45 is too low for this memory-bound shape. Raising it to 0.7 should drop exp2_13 from +203% to within +30%."*
+Good: *"A10G forward compute is 3x overestimated because the roofline ignores memory bandwidth on low-BW devices. Adding a `max(compute_time, mem_bw_time)` path in `compute_model.py` should drop exp2_13 from +203% to within +30%."*
 
-Bad: *"Try lowering all efficiencies."*
+Bad: *"Try lowering all efficiencies."* (tuning a constant without fixing the model)
 
-| Error category | Symptom | Change site |
+| Error category | Symptom | Fix (model logic, not just constants) |
 |---|---|---|
-| Compute efficiency per device | Systematic error grouped by device | `presets.py`, `config.py` DEFAULT_COMPUTE_EFFICIENCY |
-| Backward factor | bubble_pp_delta consistently one-sided | `compute_model.py`, config backward_factor |
-| Transfer model | comm_overhead_delta large | `core/timing.py`, `hardware/topology.py` |
-| Launch overhead | Small-model fixtures disproportionately wrong | `presets.py` launch_overhead_ms |
-| Framework overhead | Sim faster even with correct compute | iteration_barrier in `derive_megatron_stats.py` |
-| Scheduler modeling | Differential error between GPipe/1F1B/ZeroBubble | `core/scheduler.py` |
-| Memory bandwidth | Memory-bound stages (large activations) worse | `presets.py` memory_bandwidth_gbps |
+| Compute model missing physics | Systematic error grouped by device or shape | Add memory-BW path to roofline in `compute_model.py`; add device-specific scaling in `presets.py` |
+| Backward scaling | bubble_pp_delta consistently one-sided | Fix backward-time derivation in `compute_model.py` (e.g., layer-type-dependent ratio) |
+| Transfer model | comm_overhead_delta large | Fix contention, overlap, or topology modeling in `core/timing.py`, `hardware/topology.py` |
+| Launch / framework overhead | Small-model fixtures disproportionately wrong | Model kernel-launch amortization or framework sync in `core/pipeline.py` |
+| Scheduler modeling | Differential error between GPipe/1F1B/ZeroBubble | Fix fill/drain logic or micro-batch pipelining in `core/scheduler.py` |
+| Missing interaction effects | Error grows with pipeline depth or batch size | Add cross-stage contention, memory pressure, or GC modeling |
 
 ### IMPLEMENT — One targeted change
 
-- Directly tests one hypothesis. Prefer constant fixes over logic changes.
-- Never change multiple independent parameters simultaneously.
+- Fix the simulator's modeling logic in `src/hops/`. Constant tweaks (efficiencies,
+  overheads) are low-value — they mask wrong physics. Prefer adding or correcting
+  a modeling equation, scheduling rule, or bandwidth formula over tuning a number.
+  Examples: add a memory-bandwidth path to the roofline, fix how backward compute
+  scales, model cross-node contention that was previously ignored.
+- A constant change is acceptable only when the current value is demonstrably
+  wrong for a specific device (e.g., spec-sheet bandwidth was entered incorrectly).
+- Never change multiple independent things simultaneously.
 
 ### VALIDATE
 
@@ -109,18 +115,19 @@ error landscape shifted.
 
 ## Anti-Patterns
 
+- **Constant-tuning trap:** Adjusting efficiency floats or overhead values without understanding *why* they're wrong will overfit to the train set and won't generalize. Always ask: what physics is the model missing?
 - **Overfitting to noise:** exp2 has duplicate runs for some configs. If improvement only helps one of a pair, you're fitting run variance.
-- **Global constants for local problems:** If only A10G fixtures are wrong, don't change DEFAULT_COMPUTE_EFFICIENCY globally.
-- **Ignoring physics:** Roofline (`max(compute_time, memory_time)`) is physically grounded. No negative efficiencies or bandwidth above spec sheet.
+- **Global constants for local problems:** If only A10G fixtures are wrong, don't change DEFAULT_COMPUTE_EFFICIENCY globally — the model is probably missing a device-specific code path.
+- **Ignoring physics:** Every change must be physically grounded. No negative efficiencies or bandwidth above spec sheet.
 - **Fixing symptoms not causes:** Wrong bubble_pp_delta usually stems from wrong compute timing. Fix compute first.
 - **Too many knobs at once:** One conceptual change per iteration or you can't attribute results.
 
 ## Starting Hypotheses
 
-1. **Device efficiency mismatch.** Default 0.45 calibrated on H100. A10G/L4 may differ due to different tensor cores and memory systems. Check if A10G/L4 fixture errors are systematically larger.
-2. **Backward factor.** Default 2.0 may not match reality. Compare per-stage backward timing in `--verbose` against the 2x assumption.
-3. **GPipe amplification.** GPipe's fill/drain bubbles amplify compute errors more than 1F1B. If GPipe fixtures are disproportionately wrong, the root cause is compute, not scheduling.
-4. **Memory bandwidth bottleneck on A10G/L4.** A10G: 600 GB/s, L4: 300 GB/s vs H100: 3350 GB/s. If workloads are memory-bound on these devices but sim treats them as compute-bound, latency will be massively under-predicted.
+1. **Memory-bandwidth roofline.** The compute model may lack a memory-BW ceiling. A10G (600 GB/s) and L4 (300 GB/s) are 5–11x lower than H100 (3350 GB/s). If activation-heavy stages are memory-bound on these devices, the sim under-predicts latency because it only models FLOPs. Fix: extend `compute_model.py` roofline to `max(compute_time, activation_bytes / mem_bw)`.
+2. **Backward compute scaling.** A flat 2x factor may not hold across layer types (attention vs MLP vs embedding). Compare per-stage backward timing in `--verbose` against the 2x assumption. Fix: derive per-layer-type backward ratios or model recomputation overhead.
+3. **GPipe fill/drain modeling.** GPipe's fill/drain bubbles amplify per-stage compute errors more than 1F1B. If GPipe fixtures are disproportionately wrong, the root cause is usually compute, not scheduling — but check whether `scheduler.py` correctly models micro-batch overlap during steady state.
+4. **Cross-stage transfer contention.** With 5+ pipeline stages, multiple links may be active simultaneously and contend for shared bandwidth. If error grows with pipeline depth, the transfer model may need link-level contention (not just point-to-point latency).
 
 ## Tooling Review
 
