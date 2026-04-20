@@ -84,7 +84,7 @@ INTERCONNECT_PRESETS: dict[str, InterconnectPreset] = {
         jitter={"type": "normal", "mean": 0.0, "std": 0.1},
         penalty=LocalityPenalty(
             compute_scale=1.05,
-            memory_bandwidth_scale=0.85,
+            memory_bandwidth_scale=1.0,
             memory_latency_us=3.0,
             transfer_scale=1.05,
         ),

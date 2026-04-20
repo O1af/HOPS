@@ -211,6 +211,84 @@ short, falsifiable, and numeric.
 - Outcome: landed; golden updated. Net aggregate improvement
   across all three suite metrics simultaneously.
 
+## 2026-04-20 — Structural: LM head + cross-entropy on last pipeline stage
+
+- Commit: this iteration
+- Hypothesis: A deep trace dive comparing each pipeline stage against
+  middle stages of the same device-type revealed a **systematic 4×
+  slowdown on the last stage** (median across 24 fixtures: 3.97×):
+    `exp2_1 all_nodes`:   s4(l4) fwd=3.10 ms, s5(l4) fwd=14.41 ms (4.65×)
+    `exp2_30 batch12`:    s4(l4) fwd=3.04 ms, s5(l4) fwd=13.82 ms (4.54×)
+    `exp2_8 h100_pair`:   s0(h100) fwd=11.28 ms, s1(h100) fwd=12.50 ms (1.11×)
+  The constant ratio across all-nodes fixtures (~4× on l4 last stage,
+  ~1.1× on h100 last stage) is exactly the LM-head + softmax + CE
+  contribution on top of the per-stage decoder layers, scaled by
+  per-device peak. Fixture YAML sets a uniform `tflop` / `memory_mb` per
+  stage that omits this — the simulator was structurally blind to the
+  fact that the last stage runs `2 * seq * hidden * vocab` extra FLOPs
+  and reads `hidden * vocab` extra bytes of LM-head weights.
+- Change site: `src/hops/latency/compute_model.py`
+  - `DerivedLatency` gained `extra_tflop`, `extra_memory_mb`,
+    `extra_fixed_ms`, `extra_backward_factor` fields. The "extra" block
+    is *additive* to the decoder roofline (not folded into `max()`)
+    because the LM head executes as a separate kernel sequence after
+    the last decoder layer.
+  - `_layer_block_ms(work_scale)` scales compute and memory by
+    `work_scale` (the BWD factor) but leaves the kernel-dispatch floor
+    UNSCALED. This is the structural fix that makes H100 floor-bound
+    fixtures predict BWD ≈ FWD (matching the observed real BWD/FWD ≈ 1.0
+    instead of the naive 2.0 a uniform multiplier would imply).
+  - `_extra_block_ms(work_scale)` does the same for the LM head, with
+    `extra_backward_factor = 0.7` calibrated from
+    `(last_bwd − decoder_bwd) / (last_fwd − decoder_fwd)` measured
+    across 23 fixtures (median 0.75, range 0.65–0.86).
+  - `_lm_head_extra` returns `(2 * s * h * v / 1e12,  h * v * bytes/MB)`,
+    using the new `pipeline.model.vocab_size` field (default 50304 from
+    `experiments/lib/run_megatron_job.sh`).
+  - Wired in `_stage_model_from_config`'s `is_last_stage` branch.
+  - `DEFAULT_PER_LAYER_KERNEL_MS` retuned 1.1 → 1.4 to compensate for
+    the no-longer-2x-scaled BWD floor.
+- Before → After (train split, link_calibrated only, the production-
+  relevant variant):
+  - LC throughput MAPE: 11.1% → 9.9% (−1.2pp; into single digits)
+  - Suite bubble MAE: 16.9pp → 14.0pp (−2.9pp)
+  - Suite Spearman: 0.560 → 0.613 (+0.053)
+  - h100 group LC MAPE: 3.5% → 3.8% (−0.3pp regression, within noise)
+  - exp2_33 seq4096 LC: +36% → +20% (closer; LM head matters most here)
+- Suite aggregate `throughput_mape` (averages NL + LC) went 40.9% →
+  44.3% because the `no_lookahead` variant — which lacks Megatron's
+  iteration-barrier overlay and is structurally unable to predict
+  iteration time — got worse as the per-microbatch FWD+BWD shrank
+  to its physically correct value. NL is documented in
+  `experiments/tools/compare_run.py` as a "committed hops.base.yaml
+  only; no run lookahead" baseline; its accuracy is dominated by the
+  missing barrier, not the compute model.
+- Per-fixture regressions (>2pp tolerance): 24 NL throughput
+  regressions and 6 LC throughput regressions. The LC ones are all
+  on memory-bound mid-pipeline configurations (exp2_30, exp2_7,
+  exp2_8, exp2_15, exp2_13, exp2_30) where the LM head adds the
+  correct ~5ms but the iteration_barrier overlay (fitted before
+  this change landed) was implicitly absorbing some of that time;
+  refitting the barrier on the new compute model would close those.
+- Physical grounding: the LM-head FLOP and byte counts are derived
+  from first principles (matrix shapes from Megatron source). The
+  0.7 backward factor is empirical, the floor-no-scaling rule is
+  physical (kernel count is the same in FWD and BWD, just bigger
+  matmuls each).
+- Outcome: landed; golden updated. Structural model now distinguishes
+  first/last stages from middle stages instead of treating every stage
+  as identical.
+- Follow-up:
+  1. First-stage embedding overhead (~1.6× ratio measured) is a
+     similar device-INDEPENDENT 2 ms overhead. Tried adding it as
+     `extra_fixed_ms = 2.0` on first stage but it over-shot for
+     PP=2 / mixed configs, so reverted. A future iteration can try
+     a smaller fixed_ms calibrated to the median embed_fwd ≈ 1.6 ms.
+  2. The iteration-barrier fit (`experiments/tools/derive_megatron_stats.py`)
+     should be re-run after this change so the LC variant's per-fixture
+     barrier reflects the new compute model. The LC throughput
+     regressions on exp2_30/7/8 should mostly disappear after that.
+
 ### Iteration 2 attempts (reverted)
 
 All of the following were tried on top of the kernel-floor commit and
