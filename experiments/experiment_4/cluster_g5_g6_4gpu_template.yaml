@@ -1,0 +1,52 @@
+# Experiment 4 cluster template (4 GPU nodes, one GPU/node):
+# - Head node: c6i.large
+# - g-hetero queue: 2 x g5.2xlarge (A10G) + 2 x g6.4xlarge (L4)
+#
+# Replace placeholder values before creating the cluster.
+
+Region: us-east-1
+
+Image:
+  Os: ubuntu2204
+
+HeadNode:
+  InstanceType: c6i.large
+  Ssh:
+    KeyName: REPLACE_WITH_YOUR_KEYPAIR
+  Networking:
+    SubnetId: subnet-REPLACE_HEADNODE_SUBNET
+
+Scheduling:
+  Scheduler: slurm
+  SlurmQueues:
+    - Name: g-hetero
+      CapacityType: ONDEMAND
+      Networking:
+        SubnetIds:
+          - subnet-REPLACE_COMPUTE_SUBNET
+        AssignPublicIp: false
+      ComputeResources:
+        - Name: g5a
+          InstanceType: g5.2xlarge
+          MinCount: 1
+          MaxCount: 1
+          CapacityReservationTarget:
+            CapacityReservationId: cr-REPLACE_G5A
+        - Name: g5b
+          InstanceType: g5.2xlarge
+          MinCount: 1
+          MaxCount: 1
+          CapacityReservationTarget:
+            CapacityReservationId: cr-REPLACE_G5B
+        - Name: g6a
+          InstanceType: g6.4xlarge
+          MinCount: 1
+          MaxCount: 1
+          CapacityReservationTarget:
+            CapacityReservationId: cr-REPLACE_G6A
+        - Name: g6b
+          InstanceType: g6.4xlarge
+          MinCount: 1
+          MaxCount: 1
+          CapacityReservationTarget:
+            CapacityReservationId: cr-REPLACE_G6B

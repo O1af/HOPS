@@ -266,3 +266,6 @@ def make_scheduler(config: dict) -> Scheduler:
     if policy not in _SCHEDULER_REGISTRY:
         raise ValueError(f"Unknown scheduler policy: {policy}. Options: {list(_SCHEDULER_REGISTRY)}")
     return _SCHEDULER_REGISTRY[policy]()
+
+# Register heterogeneity-aware scheduler policies.
+from hops.core import hetero_schedulers as _hetero_schedulers  # noqa: F401
