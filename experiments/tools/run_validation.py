@@ -32,7 +32,6 @@ from __future__ import annotations
 import argparse
 import json
 import shutil
-import subprocess
 from pathlib import Path
 
 import compare_run
@@ -48,14 +47,23 @@ from parse_link_bench import (
 
 
 def _run_hops(config_path: Path, summary_path: Path) -> None:
-    cmd = [
-        "uv", "run", "python", "main.py",
-        "--config", str(config_path),
-        "--no-viz",
-        "--summary-json", str(summary_path),
-    ]
+    import yaml
+
+    from hops.config import parse_config
+    from hops.runtime import build_runtime
+
+    with open(config_path, encoding="utf-8") as f:
+        raw_config = yaml.safe_load(f)
+
+    config = parse_config(raw_config)
+    runtime = build_runtime(config)
+
+    for _ in range(runtime.num_batches):
+        runtime.pipeline.start_batch(runtime.num_microbatches)
+        runtime.engine.run(stop_condition=lambda: runtime.pipeline.batch_complete)
+
     summary_path.parent.mkdir(parents=True, exist_ok=True)
-    subprocess.run(cmd, check=True, cwd=repo_root())
+    runtime.reporter.write_summary_json(str(summary_path))
 
 
 def _write_no_lookahead_summary(job_dir: Path, derived_dir: Path, base_config: Path) -> bool:

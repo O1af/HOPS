@@ -24,7 +24,9 @@ import run_validation  # noqa: E402
 from loader import discover_fixtures, materialize_fixture  # noqa: E402
 from validate_fixtures import TOLERANCES, _load_golden  # noqa: E402
 
-_FIXTURE_MAP = {f.name: f for f in discover_fixtures()}
+_FIXTURE_MAP = {
+    f.name: f for f in discover_fixtures() if "/archive/" not in str(f)
+}
 _GOLDEN = _load_golden()
 
 

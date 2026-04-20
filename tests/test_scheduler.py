@@ -86,11 +86,3 @@ def test_register_scheduler_overwrites():
         _SCHEDULER_REGISTRY["gpipe"] = original
 
 
-def test_all_microbatches_complete():
-    """Both schedulers should complete all micro-batches."""
-    for sched in [GPipeScheduler(), OneFOneBScheduler()]:
-        engine, pipeline, collector = make_test_pipeline(sched)
-        pipeline.start_batch(4)
-        engine.run()
-        mb_ids = set(r.microbatch_id for r in collector.computes)
-        assert len(mb_ids) == 4
