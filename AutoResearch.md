@@ -289,6 +289,43 @@ short, falsifiable, and numeric.
      barrier reflects the new compute model. The LC throughput
      regressions on exp2_30/7/8 should mostly disappear after that.
 
+### Iteration 3 follow-up attempts (reverted)
+
+All tried on top of the LM-head structural commit:
+
+- **First-stage `extra_fixed_ms = 1.5–2.0`** (token + position
+  embedding, layernorm, pipeline-input receive). Median real
+  embed_fwd ≈ 1.8 ms, embed_bwd ≈ 0.7 ms, ratio 0.35 (24
+  fixtures). Adding it lowered bubble MAE further (14.0 → 13.9
+  pp) but flipped per-stage utilization rank-order on H100 PP=2
+  fixtures, dropping suite Spearman 0.613 → 0.500. The H100 LM
+  head extra is sub-ms (memory-bound on a 2 TB/s GPU), but the
+  embed extra would be 1.5+ ms, making sim s0 > sim s1 when
+  real has s0 < s1. Reverted; would need device-aware embed
+  scaling to land cleanly.
+- **Quadratic logits in LM head** (`weight_mb + 2 * logits_mb`).
+  Helped exp2_33 seq=4096 (sim was +47% over, this brought it to
+  +18%) but over-shot every other fixture by 5–15 pp because
+  short-seq LM head doesn't actually do two full passes over the
+  logits buffer. Reverted; the linear-weight-only model is the
+  best single-coefficient choice.
+- **Half-coefficient logits** (`weight_mb + 0.5 * logits_mb`).
+  Net wash: LC MAPE 9.9 → 10.0, bubble 14.0 → 13.9. Not enough
+  improvement to justify added complexity.
+- **Suppress `launch_overhead_ms` for analytical-compute stages**
+  (rationale: the per-layer kernel floor already captures the
+  dominant kernel-dispatch chain, so adding the 1.5 ms launch
+  on top double-counts). Lowered LC MAPE 9.9 → 9.0 and bubble
+  14.0 → 11.9 pp on average, but flipped H100 PP=2 fixtures
+  from accurate to over-predict by 5–9 pp. Reverted; the
+  trade-off favors the more conservative version with launch
+  overhead retained.
+- **`per_layer_kernel_ms` 1.4 → 1.2 / 1.3 / 1.5 / 1.8 / 2.0 / 2.2**
+  parameter sweep. Every other tested k landed within 0.4 pp of
+  the chosen 1.4 on suite MAPE; 1.4 was Pareto-optimal across
+  (LC MAPE, bubble MAE, util Spearman) — no single other k beat
+  it on more than one of the three axes.
+
 ### Iteration 2 attempts (reverted)
 
 All of the following were tried on top of the kernel-floor commit and
