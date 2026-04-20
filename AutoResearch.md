@@ -247,3 +247,25 @@ YAML data** itself (memory_mb not scaling correctly with hidden_dim,
 tflop not accounting for LM-head compute on the last stage) rather
 than in the simulator. Those are outside the OBSERVE → FIX loop's
 scope since we must work only within `src/hops/`.
+
+### Iteration 3 attempts (reverted)
+
+- **Scale `memory_access_mb` by `precision.data_scale`** (so BF16
+  halves the modeled memory footprint) in `ComputeModel
+  .from_pipeline_config`. Intuition: fixtures declare `memory_mb`
+  in bytes-agnostic terms and the BF16 usage should shrink it
+  2×. Empirically the fixture `memory_mb` values are already
+  calibrated for BF16 — halving them made memory_ms half and
+  throughput under-predict across the board. Suite MAPE 40.9% →
+  81.6%. Reverted.
+- **Add `4·s²·h` attention term to the layer-flop formula** so
+  `layer_count` reflects quadratic-in-seq attention cost (raising
+  layers for seq4096, lowering slightly for everything). Suite
+  MAPE 40.9% → 43.7% because the empirical H100 floor slope was
+  best fit by the quadratic-in-hidden formula. Reverted.
+- **Shape-aware `backward_factor` override** in `ComputeModel`:
+  tried amplifying BWD for long-sequence attention-heavy configs.
+  Explored analytically (expected +0.2× on seq4096) but the
+  structural change to override YAML `backward_factor` only when
+  it's the default 2.0 felt hacky for a marginal win; not
+  implemented.
