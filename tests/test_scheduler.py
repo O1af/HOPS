@@ -56,6 +56,11 @@ def test_make_scheduler_unknown_raises():
         make_scheduler({"policy": "unknown"})
 
 
+def test_heterogeneous_hops_requires_runtime_context():
+    with pytest.raises(ValueError, match="heterogeneous_hops requires"):
+        make_scheduler({"policy": "heterogeneous_hops"})
+
+
 def test_register_custom_scheduler():
     """register_scheduler makes a custom policy available via make_scheduler."""
 

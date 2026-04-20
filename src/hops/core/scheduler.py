@@ -1,10 +1,20 @@
 """Scheduling policies for pipeline execution."""
 
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
 from collections import defaultdict
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any
 
 from hops.core.types import Phase, StageTask, TaskStatus
+
+if TYPE_CHECKING:
+    from hops.config import AppConfig
+    from hops.hardware.topology import Topology
+    from hops.presets import PresetRegistry
+
+_PER_LAYER_KERNEL_MS = 1.4
 
 
 @dataclass
@@ -222,12 +232,221 @@ class ZeroBubbleScheduler(Scheduler):
         return tasks
 
 
+def _estimate_layer_count(tflop: float, model: Any) -> float:
+    if model is None or tflop <= 0:
+        return 0.0
+    per_layer_tflop = 24.0 * model.seq_len * (model.hidden_dim**2) / 1e12
+    if per_layer_tflop <= 0:
+        return 0.0
+    return tflop / per_layer_tflop
+
+
+def _analytical_forward_ms(
+    *,
+    tflop: float,
+    memory_mb: float,
+    device_flops: float,
+    memory_bw_gbps: float,
+    efficiency_compute: float,
+    efficiency_memory: float,
+    compute_scale: float,
+    memory_bw_scale: float,
+    memory_latency_us: float,
+    launch_overhead_ms: float,
+    layer_count: float,
+    model: Any,
+) -> float:
+    effective_flops = device_flops * efficiency_compute
+    compute_ms = 1000.0 * tflop / effective_flops * compute_scale
+    memory_ms = 0.0
+    if memory_mb > 0 and memory_bw_gbps > 0:
+        effective_bw = memory_bw_gbps * efficiency_memory * memory_bw_scale
+        memory_ms = (memory_mb * 8.0) / effective_bw + memory_latency_us / 1000.0
+    kernel_floor_ms = _PER_LAYER_KERNEL_MS * layer_count
+    return max(compute_ms, memory_ms, kernel_floor_ms) + launch_overhead_ms
+
+
+def build_stage_compute_weights(
+    app: AppConfig,
+    topology: Topology,
+    registry: PresetRegistry,
+) -> list[float]:
+    from hops.config import StageConfig
+
+    precision_speedup = app.pipeline.precision.compute_speedup
+    model = app.pipeline.model
+    b_frac = (
+        app.pipeline.backward_split.activation_grad_fraction
+        if app.pipeline.backward_split.enabled
+        else 0.5
+    )
+    bf = app.pipeline.backward_factor
+    b_scale = bf * b_frac
+    w_scale = bf * (1.0 - b_frac)
+    overrides = {o.id: o for o in app.overrides.devices}
+    spec_by_id = {d.id: d for d in app.hardware.devices}
+    weights: list[float] = []
+    for stage in sorted(app.pipeline.stages, key=lambda s: s.id):
+        assert isinstance(stage, StageConfig)
+        dev_spec = spec_by_id[stage.device]
+        preset = registry.device(dev_spec.preset)
+        override = overrides.get(dev_spec.id)
+        flops = (
+            override.flops_tflops
+            if override and override.flops_tflops is not None
+            else preset.flops_tflops
+        )
+        mbw = (
+            override.memory_bandwidth_gbps
+            if override and override.memory_bandwidth_gbps is not None
+            else preset.memory_bandwidth_gbps
+        )
+        launch = (
+            override.launch_overhead_ms
+            if override and override.launch_overhead_ms is not None
+            else preset.launch_overhead_ms
+        )
+        if stage.compute_mode != "analytical" or stage.analytical is None:
+            weights.append(1.0)
+            continue
+        an = stage.analytical
+        penalty = topology.stage_locality_penalty(
+            device_id=stage.device,
+            memory_placement=stage.memory_placement,
+        )
+        compute_scale = penalty.compute_scale / precision_speedup
+        lc = _estimate_layer_count(an.tflop, model)
+        fwd = _analytical_forward_ms(
+            tflop=an.tflop,
+            memory_mb=an.memory_mb,
+            device_flops=flops,
+            memory_bw_gbps=mbw or 1.0,
+            efficiency_compute=an.efficiency_compute,
+            efficiency_memory=an.efficiency_memory,
+            compute_scale=compute_scale,
+            memory_bw_scale=penalty.memory_bandwidth_scale,
+            memory_latency_us=penalty.memory_latency_us,
+            launch_overhead_ms=launch if launch is not None else 1.5,
+            layer_count=lc,
+            model=model,
+        )
+        weights.append(fwd * (1.0 + b_scale + w_scale))
+    return weights
+
+
+class HeterogeneousHopsScheduler(Scheduler):
+    uses_w_split: bool = True
+
+    def __init__(self, stage_weights: list[float]) -> None:
+        self._w = list(stage_weights)
+        if not self._w:
+            raise ValueError("stage_weights must be non-empty")
+        med = sorted(self._w)[len(self._w) // 2]
+        med = med if med > 1e-9 else 1.0
+        self._rel = [max(1e-9, x) / med for x in self._w]
+        self._crit = int(max(range(len(self._rel)), key=lambda i: self._rel[i]))
+
+    @classmethod
+    def from_app(
+        cls,
+        app: AppConfig,
+        topology: Topology,
+        registry: PresetRegistry,
+    ) -> HeterogeneousHopsScheduler:
+        return cls(build_stage_compute_weights(app, topology, registry))
+
+    def _warmup_limit(self, stage: int, num_microbatches: int) -> int:
+        s = len(self._rel)
+        base = s - stage
+        if stage >= s - 1:
+            return min(base, num_microbatches)
+        rs = self._rel[stage]
+        rd = self._rel[stage + 1]
+        ratio = rd / rs if rs > 1e-12 else 1.0
+        extra = max(0, int(round(ratio - 1.0)))
+        return min(num_microbatches, base + extra)
+
+    def _defer_w(self, stage: int) -> bool:
+        r = self._rel[stage]
+        if stage == self._crit:
+            return False
+        return r < 1.0 - 1e-9
+
+    def next_tasks(self, state: PipelineState) -> list[StageTask]:
+        tasks: list[StageTask] = []
+        s = state
+
+        for stage in range(s.num_stages):
+            if s.stage_is_busy(stage):
+                continue
+
+            fwd_done = s.completed_count(stage, Phase.FORWARD)
+            b_done = s.completed_count(stage, Phase.BACKWARD_B)
+            w_done = s.completed_count(stage, Phase.BACKWARD_W)
+
+            warmup_limit = self._warmup_limit(stage, s.num_microbatches)
+            all_fwd_done = fwd_done >= s.num_microbatches
+            all_b_done = b_done >= s.num_microbatches
+
+            if all_fwd_done and all_b_done:
+                if w_done < b_done:
+                    mb = w_done
+                    if s.is_task_ready(stage, mb, Phase.BACKWARD_W):
+                        tasks.append(StageTask(mb, stage, Phase.BACKWARD_W))
+                continue
+
+            if fwd_done >= warmup_limit and b_done < fwd_done:
+                mb = b_done
+                if s.is_task_ready(stage, mb, Phase.BACKWARD_B):
+                    tasks.append(StageTask(mb, stage, Phase.BACKWARD_B))
+                    continue
+
+            if fwd_done < s.num_microbatches:
+                mb = fwd_done
+                if s.is_task_ready(stage, mb, Phase.FORWARD):
+                    tasks.append(StageTask(mb, stage, Phase.FORWARD))
+                    continue
+
+            if w_done < b_done:
+                mb = w_done
+                if s.is_task_ready(stage, mb, Phase.BACKWARD_W):
+                    if self._defer_w(stage):
+                        pass
+                    else:
+                        tasks.append(StageTask(mb, stage, Phase.BACKWARD_W))
+                    continue
+
+            if b_done < s.num_microbatches and fwd_done > b_done:
+                mb = b_done
+                if s.is_task_ready(stage, mb, Phase.BACKWARD_B):
+                    tasks.append(StageTask(mb, stage, Phase.BACKWARD_B))
+
+        if not tasks:
+            for stage in range(s.num_stages):
+                if s.stage_is_busy(stage):
+                    continue
+                fwd_done = s.completed_count(stage, Phase.FORWARD)
+                b_done = s.completed_count(stage, Phase.BACKWARD_B)
+                w_done = s.completed_count(stage, Phase.BACKWARD_W)
+                all_fwd_done = fwd_done >= s.num_microbatches
+                all_b_done = b_done >= s.num_microbatches
+                if all_fwd_done and all_b_done:
+                    continue
+                if w_done < b_done and self._defer_w(stage):
+                    mb = w_done
+                    if s.is_task_ready(stage, mb, Phase.BACKWARD_W):
+                        tasks.append(StageTask(mb, stage, Phase.BACKWARD_W))
+                        break
+
+        return tasks
+
+
 def max_in_flight_count(policy: str, stage_idx: int,
                         num_stages: int, num_microbatches: int) -> int:
     """Upper bound on simultaneous activations stored at a stage."""
     if policy == "gpipe":
         return num_microbatches
-    # 1F1B and ZeroBubble: bounded by pipeline depth
+    # 1F1B, ZeroBubble, heterogeneous_hops: bounded by pipeline depth
     return min(num_stages - stage_idx, num_microbatches)
 
 
@@ -235,6 +454,7 @@ _SCHEDULER_REGISTRY: dict[str, type[Scheduler]] = {
     "gpipe": GPipeScheduler,
     "1f1b": OneFOneBScheduler,
     "zero_bubble": ZeroBubbleScheduler,
+    "heterogeneous_hops": HeterogeneousHopsScheduler,
 }
 
 
@@ -247,9 +467,23 @@ def register_scheduler(name: str, cls: type[Scheduler]) -> None:
     _SCHEDULER_REGISTRY[name] = cls
 
 
-def make_scheduler(config: dict) -> Scheduler:
+def make_scheduler(
+    config: dict,
+    *,
+    app: AppConfig | None = None,
+    topology: Topology | None = None,
+    registry: PresetRegistry | None = None,
+) -> Scheduler:
     """Factory function to create a scheduler from config."""
     policy = config["policy"]
     if policy not in _SCHEDULER_REGISTRY:
         raise ValueError(f"Unknown scheduler policy: {policy}. Options: {list(_SCHEDULER_REGISTRY)}")
-    return _SCHEDULER_REGISTRY[policy]()
+    cls = _SCHEDULER_REGISTRY[policy]
+    if cls is HeterogeneousHopsScheduler:
+        if app is None or topology is None or registry is None:
+            raise ValueError(
+                "heterogeneous_hops requires app, topology, and registry "
+                "arguments to make_scheduler()"
+            )
+        return HeterogeneousHopsScheduler.from_app(app, topology, registry)
+    return cls()

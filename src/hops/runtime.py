@@ -169,7 +169,12 @@ def build_runtime(config: AppConfig, registry: PresetRegistry | None = None) -> 
     validate_memory(config, topology, activation_mb)
 
     compute_model = ComputeModel.from_pipeline_config(config.pipeline, topology=topology)
-    scheduler = make_scheduler({"policy": config.pipeline.schedule})
+    scheduler = make_scheduler(
+        {"policy": config.pipeline.schedule},
+        app=config,
+        topology=topology,
+        registry=registry,
+    )
     collector = MetricsCollector()
     engine = EventEngine()
     stages = [Stage(id=stage.id, device_id=stage.device) for stage in config.pipeline.stages]
