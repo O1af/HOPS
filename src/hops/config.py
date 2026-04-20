@@ -88,6 +88,12 @@ class BackwardSplitConfig:
 class ModelConfig:
     hidden_dim: int
     seq_len: int
+    vocab_size: int = 50304
+    """Vocabulary size used by the LM head + cross-entropy on the *last*
+    pipeline stage. Defaults to the GPT-2/Megatron tokenizer size used by
+    every experiment_2 / experiment_3 run (`--vocab-size 50304` in
+    `experiments/lib/run_megatron_job.sh`). Override only if the trace
+    used a different tokenizer."""
 
 
 @dataclass(frozen=True)
@@ -275,7 +281,13 @@ class ConfigParser:
             raise ValueError("pipeline.model requires 'hidden_dim' and 'seq_len'")
         _require_positive(raw["hidden_dim"], "pipeline.model.hidden_dim")
         _require_positive(raw["seq_len"], "pipeline.model.seq_len")
-        return ModelConfig(hidden_dim=raw["hidden_dim"], seq_len=raw["seq_len"])
+        vocab_size = raw.get("vocab_size", 50304)
+        _require_positive(vocab_size, "pipeline.model.vocab_size")
+        return ModelConfig(
+            hidden_dim=raw["hidden_dim"],
+            seq_len=raw["seq_len"],
+            vocab_size=vocab_size,
+        )
 
     def _parse_stage(self, stage_id: int, raw: dict) -> StageConfig:
         _require_non_negative(raw["weights_mb"], f"pipeline.stages[{stage_id}].weights_mb")
