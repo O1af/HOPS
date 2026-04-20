@@ -204,7 +204,10 @@ overrides:
 
 ## Custom Scheduling Policies
 
-HOPS ships with GPipe and 1F1B schedulers. To add your own:
+HOPS ships with `gpipe`, `1f1b`, `zero_bubble`, and the heterogeneity-aware
+`hops_hetero` policy (plus several experimental candidates in
+`src/hops/core/hetero_schedulers.py`; see `HeteroResearch.md` for the
+full research log). To add your own:
 
 ```python
 from hops import register_scheduler

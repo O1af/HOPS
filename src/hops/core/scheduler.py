@@ -92,6 +92,19 @@ class PipelineState:
 class Scheduler(ABC):
     uses_w_split: bool = False
 
+    def configure(self, meta: dict) -> None:
+        """Optional hook for the runtime to pass static pipeline metadata.
+
+        Called once before the first batch starts. Meta keys:
+          - ``num_stages`` (int)
+          - ``num_microbatches`` (int)
+          - ``fwd_ms`` (list[float]): expected forward latency per stage
+          - ``bwd_ms`` (list[float]): expected full backward latency per stage
+          - ``b_ms`` (list[float]): BACKWARD_B latency (== bwd_ms * b_frac)
+          - ``w_ms`` (list[float]): BACKWARD_W latency (== bwd_ms * (1-b_frac))
+        Schedulers that do not need it should simply not override this.
+        """
+
     @abstractmethod
     def next_tasks(self, state: PipelineState) -> list[StageTask]:
         """Return tasks that should start now."""
