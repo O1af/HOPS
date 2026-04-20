@@ -29,10 +29,9 @@ class InterconnectPreset:
 DEVICE_PRESETS: dict[str, DevicePreset] = {
     "h100": DevicePreset(
         kind="gpu",
-        # Tensor-core peak throughput used for analytical stage estimation.
         flops_tflops=989.0,
         memory_mb=81920.0,
-        memory_bandwidth_gbps=3350.0,
+        memory_bandwidth_gbps=2000.0,
     ),
     "a100": DevicePreset(
         kind="gpu",
