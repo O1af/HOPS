@@ -28,10 +28,14 @@ short, falsifiable, and numeric.
 
 - One entry per iteration, even if reverted. Recording dead ends saves the next
   agent from repeating them.
-- Numbers come from `validate_fixtures.py --split train` SUITE AGGREGATES and
-  GROUP BREAKDOWN sections. Don't paraphrase.
-- Never cite test-split numbers. If you accidentally ran `--split test`, note
-  it and discard.
+- Iteration numbers come from `validate_fixtures.py --split train` SUITE
+  AGGREGATES and GROUP BREAKDOWN sections. Don't paraphrase.
+- The agent must not run `--split test`. If you accidentally do, note it and
+  discard.
+- Human test-bench checkpoints may record only suite-level aggregate deltas
+  (MAPE, bubble MAE, Spearman, PASS/regression). Do not record test fixture
+  names, group breakdowns, phase details, error directionality patterns, or
+  follow-up hypotheses derived from test results.
 - If you ran `--update-golden`, link the commit. Golden is gitignored locally,
   so the commit is the durable record.
 
@@ -63,6 +67,11 @@ short, falsifiable, and numeric.
   near-zero on both sides.
 - Physical grounding: matches the actual H100 variant used in the traces.
 - Outcome: landed; golden updated; full train suite `PASS`.
+- Human test-bench checkpoint (2026-04-20, human-run, aggregate only):
+  test split link_calibrated MAPE 51.8% → 41.6% (−10.2pp), bubble MAE
+  15.2pp → 14.4pp (−0.8pp), util Spearman mean 0.521 → 0.598 (+0.077),
+  suite `PASS (no regression)`. No fixture, group, phase, or error-pattern
+  details recorded, to preserve test isolation.
 - Follow-up: remaining link_calibrated errors are now bimodal —
   - *small* workloads still too fast (`exp2_23` +39%, `exp2_33` seq4096
     +36%, H100 pair +21%),
