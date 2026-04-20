@@ -33,6 +33,20 @@ uv run python experiments/tools/validate_fixtures.py --split test
 
 If train MAPE dropped but test MAPE didn't, the agent overfit to experiment_2 quirks.
 
+## Research Log — `AutoResearch.md`
+
+Every iteration (landed or reverted) is recorded in [`AutoResearch.md`](AutoResearch.md).
+
+- **Read it before OBSERVE.** The last entry tells you the current error
+  landscape, which hypotheses have already been tried, and which were
+  reverted and why. Do not repeat reverted experiments without new evidence.
+- **Append one entry per iteration**, using the template at the top of the
+  file. Record reverted attempts too — dead ends save the next agent time.
+- **Use the numbers from `validate_fixtures.py --split train`** (SUITE
+  AGGREGATES and GROUP BREAKDOWN). Don't paraphrase.
+- **Link the commit** when a change lands and golden is updated. The golden
+  file is gitignored locally, so the commit is the durable record.
+
 ## The Research Loop
 
 ### OBSERVE — Analyze training errors
@@ -88,7 +102,10 @@ Before updating golden: MAPE down or held, MAE down or held, Spearman up or held
 
 ### REFLECT
 
-Record hypothesis, change, before/after metrics. If MAPE dropped significantly, restart from OBSERVE — the error landscape shifted.
+Append an entry to `AutoResearch.md` with hypothesis, change site, before/after
+numbers, per-fixture regressions, physical grounding, and outcome (landed /
+reverted / blocked). If MAPE dropped significantly, restart from OBSERVE — the
+error landscape shifted.
 
 ## Anti-Patterns
 

@@ -29,13 +29,8 @@ class InterconnectPreset:
 DEVICE_PRESETS: dict[str, DevicePreset] = {
     "h100": DevicePreset(
         kind="gpu",
-        # Tensor-core peak throughput used for analytical stage estimation.
         flops_tflops=989.0,
         memory_mb=81920.0,
-        # H100 PCIe HBM2e peak (the fixtures in this project use pcie
-        # same-node interconnect). The SXM5 variant reaches 3.35 TB/s but
-        # isn't used here; quoting its peak left the analytical roofline
-        # ~1.7x too optimistic for the traced H100 pair workloads.
         memory_bandwidth_gbps=2000.0,
     ),
     "a100": DevicePreset(
