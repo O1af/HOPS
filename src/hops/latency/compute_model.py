@@ -7,7 +7,7 @@ from typing import Protocol
 
 import numpy as np
 
-from hops.config import PipelineConfig, StageConfig
+from hops.config import ModelConfig, PipelineConfig, StageConfig
 from hops.core.types import Phase
 from hops.hardware.topology import Topology
 from hops.latency.distributions import Constant, Distribution
@@ -32,6 +32,14 @@ class DistributionLatency:
 # transformer stages on modern GPUs this dwarfs the pure FLOP-budget estimate.
 DEFAULT_LAUNCH_OVERHEAD_MS = 1.5
 
+# Per-transformer-layer kernel dispatch / synchronization floor. A typical
+# decoder layer schedules ~8 non-trivial kernels (QKV proj, attention core,
+# out proj, MLP up, MLP down, two layernorms, residual); on modern GPUs each
+# kernel has a sub-ms launch+sync tail that pure roofline (compute/memory)
+# misses entirely. This term acts as a third floor in the roofline max() so
+# it only matters when the stage is *neither* compute- nor memory-bound.
+DEFAULT_PER_LAYER_KERNEL_MS = 1.0
+
 
 @dataclass
 class DerivedLatency:
@@ -46,6 +54,8 @@ class DerivedLatency:
     memory_latency_us: float = 0.0
     latency_scale: float = 1.0
     launch_overhead_ms: float = DEFAULT_LAUNCH_OVERHEAD_MS
+    layer_count: float = 0.0
+    per_layer_kernel_ms: float = 0.0
     jitter: Distribution = Constant(0.0)
 
     def sample(self, rng: np.random.Generator) -> float:
@@ -63,7 +73,12 @@ class DerivedLatency:
             memory_ms = (self.memory_access_mb * 8.0) / effective_bw
             memory_ms += self.memory_latency_us / 1000.0
 
-        base_ms = max(compute_ms, memory_ms) * self.latency_scale + self.launch_overhead_ms
+        kernel_floor_ms = self.per_layer_kernel_ms * self.layer_count
+
+        base_ms = (
+            max(compute_ms, memory_ms, kernel_floor_ms) * self.latency_scale
+            + self.launch_overhead_ms
+        )
         return max(0.0, base_ms + self.jitter.sample(rng))
 
 
@@ -87,19 +102,38 @@ class ComputeModel:
                 base *= self._backward_b_fraction
             elif phase == Phase.BACKWARD_W:
                 base *= 1.0 - self._backward_b_fraction
-        else:
-            base = self._models[stage_id].sample(rng)
-            if phase == Phase.BACKWARD:
-                base *= self._backward_factor
-            elif phase == Phase.BACKWARD_B:
-                base *= self._backward_factor * self._backward_b_fraction
-            elif phase == Phase.BACKWARD_W:
-                base *= self._backward_factor * (1.0 - self._backward_b_fraction)
+            return base
+
+        base = self._models[stage_id].sample(rng)
+        if phase == Phase.BACKWARD:
+            base *= self._backward_factor
+        elif phase == Phase.BACKWARD_B:
+            base *= self._backward_factor * self._backward_b_fraction
+        elif phase == Phase.BACKWARD_W:
+            base *= self._backward_factor * (1.0 - self._backward_b_fraction)
         return base
 
     @staticmethod
+    def _estimate_layer_count(stage: StageConfig, model: ModelConfig | None) -> float:
+        """Estimate transformer-layer count from analytical tflop and model shape.
+
+        A standard decoder layer does ~24 * seq * hidden^2 flops on the forward
+        pass (4 * hidden^2 per QKV/out proj, 2 * 4 * hidden^2 per MLP up/down,
+        2x for mul-add; scaled by seq for per-token cost). Returning tflop /
+        per_layer_flops gives a unitless layer count that drives the per-layer
+        kernel-dispatch floor in DerivedLatency.
+        """
+        if model is None or stage.analytical is None:
+            return 0.0
+        per_layer_tflop = 24.0 * model.seq_len * (model.hidden_dim ** 2) / 1e12
+        if per_layer_tflop <= 0:
+            return 0.0
+        return stage.analytical.tflop / per_layer_tflop
+
+    @staticmethod
     def _stage_model_from_config(stage: StageConfig, topology: Topology,
-                                 precision_speedup: float = 1.0) -> StageLatencySource:
+                                 precision_speedup: float = 1.0,
+                                 model: ModelConfig | None = None) -> StageLatencySource:
         penalty = topology.stage_locality_penalty(
             device_id=stage.device,
             memory_placement=stage.memory_placement,
@@ -127,6 +161,7 @@ class ComputeModel:
             if device.launch_overhead_ms is not None
             else DEFAULT_LAUNCH_OVERHEAD_MS
         )
+        layer_count = ComputeModel._estimate_layer_count(stage, model)
         return DerivedLatency(
             workload_tflop=stage.analytical.tflop,
             device_flops=device.flops,
@@ -139,6 +174,8 @@ class ComputeModel:
             memory_latency_us=penalty.memory_latency_us,
             latency_scale=1.0,
             launch_overhead_ms=launch_overhead_ms,
+            layer_count=layer_count,
+            per_layer_kernel_ms=DEFAULT_PER_LAYER_KERNEL_MS,
             jitter=Distribution.from_yaml(stage.analytical.jitter),
         )
 
@@ -151,6 +188,7 @@ class ComputeModel:
         for stage in pipeline.stages:
             stage_models[stage.id] = cls._stage_model_from_config(
                 stage, topology, precision_speedup=precision_speedup,
+                model=pipeline.model,
             )
             if stage.backward is not None:
                 backward_models[stage.id] = DistributionLatency(
