@@ -74,7 +74,7 @@ class Pipeline:
         self.iteration_barrier = iteration_barrier
         self._first_batch_started = False
 
-        # ZeroBubble W-split detection via scheduler attribute
+        self._configure_scheduler(stages)
         self._use_w_split = scheduler.uses_w_split
 
         # Pre-compute unique ordered devices + device→stage lookup
@@ -107,6 +107,42 @@ class Pipeline:
         engine.on(EventKind.OPTIMIZER_START, self._on_optimizer_start)
         engine.on(EventKind.OPTIMIZER_END, self._on_optimizer_end)
         engine.on(EventKind.BATCH_START, self._on_batch_start)
+
+    def _configure_scheduler(self, stages: list[Stage]) -> None:
+        rng = np.random.default_rng(0)
+        num_stages = len(stages)
+
+        def _mean_sample(stage_id: int, phase: Phase, n: int = 16) -> float:
+            total = 0.0
+            for _ in range(n):
+                total += self.timing_model.compute_model.sample(stage_id, phase, rng)
+            return total / n
+
+        fwd_ms = [_mean_sample(s.id, Phase.FORWARD) for s in stages]
+        b_ms = [_mean_sample(s.id, Phase.BACKWARD_B) for s in stages]
+        w_ms = [_mean_sample(s.id, Phase.BACKWARD_W) for s in stages]
+        bwd_ms = [b + w for b, w in zip(b_ms, w_ms)]
+
+        device_ids = [s.device_id for s in stages]
+        unique_devs: list[str] = []
+        for d in device_ids:
+            if d not in unique_devs:
+                unique_devs.append(d)
+        stage_device_idx = [unique_devs.index(d) for d in device_ids]
+
+        try:
+            self.scheduler.configure({
+                "num_stages": num_stages,
+                "num_microbatches": 0,
+                "fwd_ms": fwd_ms,
+                "bwd_ms": bwd_ms,
+                "b_ms": b_ms,
+                "w_ms": w_ms,
+                "stage_device_idx": stage_device_idx,
+                "num_devices": len(unique_devs),
+            })
+        except NotImplementedError:
+            pass
 
     @staticmethod
     def _validate_stage_configuration(stages: list[Stage]) -> None:
@@ -155,6 +191,8 @@ class Pipeline:
             num_microbatches=num_microbatches,
             use_w_split=self._use_w_split,
         )
+        if hasattr(self.scheduler, "on_batch_start"):
+            self.scheduler.on_batch_start(num_microbatches)
         self._batch.done_count = 0
         self._batch.expected_done_count = num_microbatches
         self._batch.microbatch_offset = self._total_mb_issued
